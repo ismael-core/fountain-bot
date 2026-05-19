@@ -17,7 +17,7 @@ class Refresh(commands.Cog):
     async def refresh(self, interaction: discord.Interaction):
         ts = database.log_refresh(interaction.user.id, str(interaction.user))
         await interaction.response.send_message(
-            f"✅ Refresh registrado para {interaction.user.mention} a las "
+            f"✅ Refresh logged for {interaction.user.mention} at "
             f"<t:{int(ts.timestamp())}:T>"
         )
 
@@ -37,19 +37,19 @@ class Refresh(commands.Cog):
         rows = database.get_leaderboard(days=days)
         if not rows:
             await interaction.response.send_message(
-                f"No hay refreshes registrados en los últimos {days} días."
+                f"No refreshes logged in the last {days} days."
             )
             return
 
         medals = ["🥇", "🥈", "🥉"]
-        lines = [f"**🏆 Leaderboard — últimos {days} días**", ""]
+        lines = [f"**🏆 Leaderboard — last {days} days**", ""]
         for i, row in enumerate(rows):
             prefix = medals[i] if i < 3 else f"`{i + 1}.`"
             lines.append(f"{prefix} <@{row['user_id']}> — **{row['count']}** refreshes")
 
         total = sum(r["count"] for r in rows)
         lines.append("")
-        lines.append(f"*Total: {total} refreshes registrados*")
+        lines.append(f"*Total: {total} refreshes logged*")
 
         await interaction.response.send_message(
             "\n".join(lines),
@@ -63,10 +63,10 @@ class Refresh(commands.Cog):
     async def stats(self, interaction: discord.Interaction):
         s = database.get_user_stats(interaction.user.id)
         await interaction.response.send_message(
-            f"**Tus stats**\n"
-            f"Esta semana: **{s['week']}** refreshes\n"
-            f"Este mes: **{s['month']}** refreshes\n"
-            f"Total histórico: **{s['total']}** refreshes",
+            f"**Your stats**\n"
+            f"This week: **{s['week']}** refreshes\n"
+            f"This month: **{s['month']}** refreshes\n"
+            f"All-time: **{s['total']}** refreshes",
             ephemeral=True,
         )
 

@@ -5,16 +5,16 @@ from discord.ext import commands
 
 import database
 
-DAY_NAMES_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 DAY_CHOICES = [
-    app_commands.Choice(name="Lunes", value=0),
-    app_commands.Choice(name="Martes", value=1),
-    app_commands.Choice(name="Miércoles", value=2),
-    app_commands.Choice(name="Jueves", value=3),
-    app_commands.Choice(name="Viernes", value=4),
-    app_commands.Choice(name="Sábado", value=5),
-    app_commands.Choice(name="Domingo", value=6),
+    app_commands.Choice(name="Monday", value=0),
+    app_commands.Choice(name="Tuesday", value=1),
+    app_commands.Choice(name="Wednesday", value=2),
+    app_commands.Choice(name="Thursday", value=3),
+    app_commands.Choice(name="Friday", value=4),
+    app_commands.Choice(name="Saturday", value=5),
+    app_commands.Choice(name="Sunday", value=6),
 ]
 
 
@@ -52,14 +52,14 @@ class Slots(commands.Cog):
         if not ok:
             current = database.get_slot_for(day.value, hour)
             await interaction.response.send_message(
-                f"❌ Ese slot ya está cubierto por <@{current['user_id']}>",
+                f"❌ That slot is already covered by <@{current['user_id']}>",
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
 
         await interaction.response.send_message(
-            f"✅ {interaction.user.mention} asignado a **{day.name} {hour:02d}:00**"
+            f"✅ {interaction.user.mention} assigned to **{day.name} {hour:02d}:00**"
         )
 
     @slot_group.command(name="remove", description="Remove yourself from a slot")
@@ -81,32 +81,32 @@ class Slots(commands.Cog):
         ok = database.remove_slot(interaction.user.id, day.value, hour)
         if not ok:
             await interaction.response.send_message(
-                "❌ No tenés ese slot asignado",
+                "❌ You don't have that slot assigned",
                 ephemeral=True,
             )
             return
 
         await interaction.response.send_message(
-            f"✅ Slot **{day.name} {hour:02d}:00** liberado"
+            f"✅ Slot **{day.name} {hour:02d}:00** released"
         )
 
     @slot_group.command(name="list", description="Show all slots and who covers them")
     async def slot_list(self, interaction: discord.Interaction):
         slots = database.get_all_slots()
         if not slots:
-            await interaction.response.send_message("No hay slots asignados todavía.")
+            await interaction.response.send_message("No slots assigned yet.")
             return
 
         by_day: dict[int, list[dict]] = {i: [] for i in range(7)}
         for s in slots:
             by_day[s["day_of_week"]].append(s)
 
-        lines = ["**📅 Slots semanales**", ""]
+        lines = ["**📅 Weekly slots**", ""]
         for day_idx in range(7):
             day_slots = by_day[day_idx]
             if not day_slots:
                 continue
-            lines.append(f"**{DAY_NAMES_ES[day_idx]}**")
+            lines.append(f"**{DAY_NAMES[day_idx]}**")
             for s in day_slots:
                 lines.append(f"  `{s['hour']:02d}:00` — <@{s['user_id']}>")
             lines.append("")
@@ -114,7 +114,7 @@ class Slots(commands.Cog):
         coverage = len(slots)
         total = 24 * 7
         pct = coverage * 100 // total
-        lines.append(f"*Cobertura: {coverage}/{total} slots ({pct}%)*")
+        lines.append(f"*Coverage: {coverage}/{total} slots ({pct}%)*")
 
         await interaction.response.send_message(
             "\n".join(lines),
@@ -126,14 +126,14 @@ class Slots(commands.Cog):
         slots = database.get_user_slots(interaction.user.id)
         if not slots:
             await interaction.response.send_message(
-                "No tenés slots asignados.",
+                "You have no slots assigned.",
                 ephemeral=True,
             )
             return
 
-        lines = [f"**Tus slots ({len(slots)} a la semana)**", ""]
+        lines = [f"**Your slots ({len(slots)} per week)**", ""]
         for s in slots:
-            lines.append(f"  `{DAY_NAMES_ES[s['day_of_week']]} {s['hour']:02d}:00`")
+            lines.append(f"  `{DAY_NAMES[s['day_of_week']]} {s['hour']:02d}:00`")
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 

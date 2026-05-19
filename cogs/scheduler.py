@@ -13,7 +13,7 @@ import database
 
 log = logging.getLogger("fountain.scheduler")
 
-DAY_NAMES_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 class Scheduler(commands.Cog):
@@ -71,15 +71,15 @@ class Scheduler(commands.Cog):
 
         if slot is None:
             await channel.send(
-                f"⚠️ **Slot sin cubrir**: {DAY_NAMES_ES[day]} {hour:02d}:00 "
-                f"(en {config.PRE_PING_MINUTES} min). Si alguien lo toma, usá "
-                f"`/refresh` cuando empiece la hora."
+                f"⚠️ **Uncovered slot**: {DAY_NAMES[day]} {hour:02d}:00 "
+                f"(in {config.PRE_PING_MINUTES} min). If anyone wants to take it, "
+                f"use `/refresh` when the hour starts."
             )
             return
 
         await channel.send(
-            f"⏰ <@{slot['user_id']}>, te toca el refresh de las **{hour:02d}:00** "
-            f"(en {config.PRE_PING_MINUTES} min). Cuando lo hagas usá `/refresh`."
+            f"⏰ <@{slot['user_id']}>, you're up for the **{hour:02d}:00** refresh "
+            f"(in {config.PRE_PING_MINUTES} min). Use `/refresh` when you do it."
         )
 
     async def check_missed_refresh(self):
@@ -101,14 +101,14 @@ class Scheduler(commands.Cog):
 
         if slot:
             await channel.send(
-                f"🚨 No hay refresh registrado para las **{hour:02d}:00**. "
-                f"<@{slot['user_id']}> tenía este slot — ¿podés cubrirlo o "
-                f"alguien lo toma?"
+                f"🚨 No refresh logged for **{hour:02d}:00**. "
+                f"<@{slot['user_id']}> had this slot — can you cover it, "
+                f"or someone take over?"
             )
         else:
             await channel.send(
-                f"🚨 No hay refresh registrado para las **{hour:02d}:00** "
-                f"y este slot no tiene a nadie asignado. ¿Alguien lo cubre?"
+                f"🚨 No refresh logged for **{hour:02d}:00** "
+                f"and this slot has no one assigned. Anyone able to cover?"
             )
 
 
