@@ -1,4 +1,9 @@
-"""Refresh logging, leaderboard, personal stats, and buff status."""
+"""Read-only commands over the refresh history.
+
+The /refresh command itself was removed in favor of the ticket flow.
+These commands still work and read from the same `refreshes` table that
+the ticket approval pipeline writes into.
+"""
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -13,49 +18,6 @@ BUFF_DURATION = timedelta(hours=1)
 class Refresh(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    @app_commands.command(
-        name="refresh",
-        description="Log a Fountain refresh you just did (screenshot required)",
-    )
-    @app_commands.describe(
-        proof="Screenshot showing you refreshed the Fountain in-game",
-    )
-    async def refresh(
-        self,
-        interaction: discord.Interaction,
-        proof: discord.Attachment,
-    ):
-        # Validate the attachment is actually an image
-        content_type = proof.content_type or ""
-        if not content_type.startswith("image/"):
-            await interaction.response.send_message(
-                "❌ The attached file must be an image (a screenshot of your refresh).",
-                ephemeral=True,
-            )
-            return
-
-        ts = database.log_refresh(
-            interaction.user.id,
-            str(interaction.user),
-            proof.url,
-        )
-
-        # Reschedule pre-alert and post-check from this new refresh
-        scheduler_cog = self.bot.get_cog("Scheduler")
-        if scheduler_cog is not None:
-            scheduler_cog.reschedule_after_refresh(ts)
-
-        expires_at = ts + BUFF_DURATION
-        embed = discord.Embed(
-            description=(
-                f"✅ Refresh logged for {interaction.user.mention}. "
-                f"Buff expires <t:{int(expires_at.timestamp())}:R>."
-            ),
-            color=discord.Color.green(),
-        )
-        embed.set_image(url=proof.url)
-        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
         name="leaderboard",
@@ -108,13 +70,13 @@ class Refresh(commands.Cog):
 
     @app_commands.command(
         name="buff_status",
-        description="Show the current buff status (time remaining)",
+        description="Show the current Fountain buff status (time remaining)",
     )
     async def buff_status(self, interaction: discord.Interaction):
         last = database.get_last_refresh()
         if last is None:
             await interaction.response.send_message(
-                "No refreshes logged yet. Use `/refresh` to start the cycle."
+                "No refreshes logged yet."
             )
             return
 
@@ -128,7 +90,7 @@ class Refresh(commands.Cog):
         if expires_at <= now:
             await interaction.response.send_message(
                 f"❌ Buff is **down**. Last refresh was by <@{last['user_id']}> "
-                f"<t:{int(last_ts.timestamp())}:R>. Someone refresh!",
+                f"<t:{int(last_ts.timestamp())}:R>.",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return

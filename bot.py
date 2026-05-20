@@ -1,4 +1,4 @@
-"""Entry point for the Fountain refresh bot."""
+"""Entry point for the Fountain ticket bot."""
 import logging
 
 import discord
@@ -6,6 +6,7 @@ from discord.ext import commands
 
 import config
 import database
+from views import ApprovalView, StartTicketView
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,8 +14,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("fountain")
 
+# Default intents + message content (required so the bot can read attachments
+# in messages users post in ticket channels for proof verification).
 intents = discord.Intents.default()
-# message_content is NOT needed because everything is slash commands
+intents.message_content = True
 
 
 class FountainBot(commands.Bot):
@@ -23,11 +26,20 @@ class FountainBot(commands.Bot):
 
     async def setup_hook(self):
         database.init_db()
+
+        # Load all cogs
         await self.load_extension("cogs.refresh")
         await self.load_extension("cogs.scheduler")
         await self.load_extension("cogs.admin")
+        await self.load_extension("cogs.admin_config")
+        await self.load_extension("cogs.tickets")
+        await self.load_extension("cogs.membership")
 
-        # Sync slash commands to a single guild — instant, no 1-hour propagation
+        # Register persistent views so buttons keep working after restarts
+        self.add_view(StartTicketView())
+        self.add_view(ApprovalView())
+
+        # Sync slash commands to the guild for instant availability
         guild = discord.Object(id=config.GUILD_ID)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
