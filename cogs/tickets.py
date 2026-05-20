@@ -8,7 +8,7 @@ from discord.ext import commands
 import audit_log
 import config
 import database
-from views import ApprovalView, StartTicketView
+from views import ApprovalView, RobuxVerifyView, StartTicketView
 
 log = logging.getLogger("fountain.tickets")
 
@@ -88,17 +88,16 @@ class Tickets(commands.Cog):
             )
             return
 
-        # Create the ticket record
+        # Create the ticket record (starts in 'robux' phase by default)
         ticket_id = database.create_ticket(user.id, interaction.channel_id)
 
         embed = discord.Embed(
-            title="Fountain refresh required",
+            title="Verify your Robux balance",
             description=(
                 f"👋 Hi {user.mention}\n\n"
-                f"To complete your access you need to refresh the Fountain in-game.\n\n"
-                f"**Game link:** {game_link}\n\n"
-                f"When you've done the refresh, tap the button below and upload the screenshot "
-                f"showing the refresh and the in-game time."
+                f"Before we share the game link, we need to verify you have enough "
+                f"Robux to do the refresh.\n\n"
+                f"Tap the button below and upload a screenshot of your **current Robux balance**."
             ),
             color=discord.Color.blue(),
         )
@@ -107,7 +106,7 @@ class Tickets(commands.Cog):
         await interaction.response.send_message(
             content=user.mention,
             embed=embed,
-            view=StartTicketView(),
+            view=RobuxVerifyView(),
         )
 
         await audit_log.log_event(
@@ -116,7 +115,7 @@ class Tickets(commands.Cog):
             user=user,
             mod=interaction.user,
             ticket_id=ticket_id,
-            details={"channel_id": interaction.channel_id},
+            details={"channel_id": interaction.channel_id, "phase": "robux"},
         )
 
     # ----------------------------------------------------------------
@@ -178,12 +177,21 @@ class Tickets(commands.Cog):
         # Move ticket to PENDING and post the proof for mod approval
         database.set_ticket_status(ticket["id"], database.TICKET_PENDING)
 
-        embed = discord.Embed(
-            title="📸 Proof submitted",
-            description=(
-                f"From {message.author.mention} — mods please review.\n\n"
+        is_robux_phase = ticket["phase"] == database.TICKET_PHASE_ROBUX
+
+        if is_robux_phase:
+            title = "💰 Robux balance proof submitted"
+            description = f"From {message.author.mention} — mods please verify they have enough Robux."
+        else:
+            title = "📸 Refresh proof submitted"
+            description = (
+                f"From {message.author.mention} — mods please verify.\n\n"
                 f"Refresh #{ticket['refresh_count'] + 1}/{config.MAX_REFRESHES_PER_TICKET}"
-            ),
+            )
+
+        embed = discord.Embed(
+            title=title,
+            description=description,
             color=discord.Color.light_grey(),
         )
         embed.set_image(url=att.url)
@@ -196,12 +204,13 @@ class Tickets(commands.Cog):
             allowed_mentions=discord.AllowedMentions(roles=True, users=False),
         )
 
+        event_type = "proof_uploaded"
         await audit_log.log_event(
             self.bot,
-            "proof_uploaded",
+            event_type,
             user=message.author,
             ticket_id=ticket["id"],
-            details={"proof_url": att.url},
+            details={"proof_url": att.url, "phase": ticket["phase"]},
         )
 
 

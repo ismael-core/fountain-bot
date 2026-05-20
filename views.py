@@ -1,15 +1,18 @@
 """Persistent Discord UI views used in the ticket flow.
 
-Two views:
-- StartTicketView: shown when `/start_ticket` runs. Has one button ("Send proof")
-  that puts the ticket in WAITING_PROOF status.
-- ApprovalView: shown on the proof message. Has two buttons (Approve / Reject)
-  that only users with the MOD_ROLE can use.
+Three views:
+- RobuxVerifyView: shown at the start. Button puts the ticket in WAITING_PROOF
+  to upload the Robux balance screenshot (phase='robux').
+- StartTicketView: shown after Robux is approved. Button puts the ticket in
+  WAITING_PROOF to upload the refresh screenshot (phase='refresh').
+- ApprovalView: shown on every proof message. The Approve callback behavior
+  depends on the ticket's current phase.
 
-Both views use timeout=None and stable custom_ids so they survive bot restarts.
+All three use timeout=None and stable custom_ids so they survive bot restarts.
 The bot must register them in setup_hook with bot.add_view(...).
 """
 import logging
+from datetime import datetime, timezone
 
 import discord
 
@@ -21,12 +24,69 @@ log = logging.getLogger("fountain.views")
 
 
 # ====================================================================
-# StartTicketView — shown in the ticket channel after /start_ticket
+# Helpers
+# ====================================================================
+
+async def _mark_waiting_for_proof(
+    interaction: discord.Interaction,
+    proof_kind: str,
+):
+    """Common code for both proof-request buttons: validate the ticket and
+    mark it as WAITING_PROOF, then tell the user to upload an image.
+
+    `proof_kind` is the user-facing label ('Robux balance' or 'refresh').
+    """
+    ticket = database.get_ticket_by_channel(interaction.channel_id)
+    if ticket is None:
+        await interaction.response.send_message(
+            "❌ No ticket found for this channel.",
+            ephemeral=True,
+        )
+        return
+
+    if interaction.user.id != ticket["user_id"]:
+        await interaction.response.send_message(
+            "❌ Only the ticket owner can use this button.",
+            ephemeral=True,
+        )
+        return
+
+    database.set_ticket_status(ticket["id"], database.TICKET_WAITING_PROOF)
+
+    await interaction.response.send_message(
+        f"📤 Now upload your **{proof_kind} screenshot** as a normal message in this channel. "
+        f"I'll detect it automatically.",
+        ephemeral=True,
+    )
+
+
+# ====================================================================
+# RobuxVerifyView — shown first, asks for Robux balance proof
+# ====================================================================
+
+class RobuxVerifyView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Send Robux proof",
+        style=discord.ButtonStyle.primary,
+        custom_id="fountain_send_robux",
+        emoji="💰",
+    )
+    async def send_robux(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+        await _mark_waiting_for_proof(interaction, "Robux balance")
+
+
+# ====================================================================
+# StartTicketView — shown after Robux is approved, asks for refresh proof
 # ====================================================================
 
 class StartTicketView(discord.ui.View):
-    """View with a single 'Send proof' button. Persistent across restarts."""
-
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -41,40 +101,14 @@ class StartTicketView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
-        # Find the ticket for this channel
-        ticket = database.get_ticket_by_channel(interaction.channel_id)
-        if ticket is None:
-            await interaction.response.send_message(
-                "❌ No ticket found for this channel.",
-                ephemeral=True,
-            )
-            return
-
-        # Only the ticket owner can click this button
-        if interaction.user.id != ticket["user_id"]:
-            await interaction.response.send_message(
-                "❌ Only the ticket owner can use this button.",
-                ephemeral=True,
-            )
-            return
-
-        # Mark the ticket as waiting for proof
-        database.set_ticket_status(ticket["id"], database.TICKET_WAITING_PROOF)
-
-        await interaction.response.send_message(
-            "📤 Now upload your screenshot as a normal message in this channel. "
-            "Make sure the in-game time is visible. I'll detect it automatically.",
-            ephemeral=True,
-        )
+        await _mark_waiting_for_proof(interaction, "refresh")
 
 
 # ====================================================================
-# ApprovalView — shown on the proof message for mods to approve/reject
+# ApprovalView — Approve / Reject buttons used in both phases
 # ====================================================================
 
 class ApprovalView(discord.ui.View):
-    """View with Approve / Reject buttons. Only MOD_ROLE_ID can use them."""
-
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -107,7 +141,63 @@ class ApprovalView(discord.ui.View):
             )
             return
 
-        # Cap at MAX_REFRESHES_PER_TICKET
+        if ticket["phase"] == database.TICKET_PHASE_ROBUX:
+            await self._approve_robux(interaction, ticket)
+        else:
+            await self._approve_refresh(interaction, ticket)
+
+    async def _approve_robux(self, interaction: discord.Interaction, ticket: dict):
+        """Approve the Robux verification step and post the game link next."""
+        # Move ticket to refresh phase, status back to CREATED so the user
+        # can click the new 'Send proof' button.
+        database.set_ticket_phase(ticket["id"], database.TICKET_PHASE_REFRESH)
+        database.set_ticket_status(ticket["id"], database.TICKET_CREATED)
+
+        # Disable this approval message
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Robux balance approved by {interaction.user.mention}. "
+                f"Posting game link next."
+            ),
+            view=self,
+        )
+
+        # Find the user and the game link
+        user = interaction.guild.get_member(ticket["user_id"])
+        game_link = database.get_config("game_link") or "(no link configured — admin must run /set_link)"
+        user_mention = user.mention if user else f"<@{ticket['user_id']}>"
+
+        embed = discord.Embed(
+            title="Now refresh the Fountain",
+            description=(
+                f"💧 {user_mention}\n\n"
+                f"Your Robux balance is verified. Now do the refresh in-game.\n\n"
+                f"**Game link:** {game_link}\n\n"
+                f"When you've done it, tap the button below and upload the screenshot "
+                f"showing the refresh and the in-game time."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text=f"Ticket #{ticket['id']}")
+
+        await interaction.followup.send(
+            content=user_mention,
+            embed=embed,
+            view=StartTicketView(),
+        )
+
+        await audit_log.log_event(
+            interaction.client,
+            "robux_verified",
+            user=user,
+            mod=interaction.user,
+            ticket_id=ticket["id"],
+        )
+
+    async def _approve_refresh(self, interaction: discord.Interaction, ticket: dict):
+        """Approve a refresh screenshot — bumps the AFK timer."""
         if ticket["refresh_count"] >= config.MAX_REFRESHES_PER_TICKET:
             await interaction.response.send_message(
                 f"❌ This ticket already reached the max of "
@@ -118,7 +208,7 @@ class ApprovalView(discord.ui.View):
             )
             return
 
-        # Find the proof URL from the original message (first attachment in the proof message)
+        # Pull proof URL from the message (embed image or attachment fallback)
         proof_url = ""
         if interaction.message.embeds:
             embed = interaction.message.embeds[0]
@@ -127,7 +217,6 @@ class ApprovalView(discord.ui.View):
         if not proof_url and interaction.message.attachments:
             proof_url = interaction.message.attachments[0].url
 
-        # Approve: bump count, set new expires_at
         expires_at = database.approve_refresh(
             ticket["id"],
             mod_id=interaction.user.id,
@@ -135,7 +224,6 @@ class ApprovalView(discord.ui.View):
         )
         is_extension = ticket["refresh_count"] >= 1
 
-        # Log the refresh in the refreshes table for leaderboard/stats
         user = interaction.guild.get_member(ticket["user_id"])
         username = str(user) if user else f"user_{ticket['user_id']}"
         database.log_refresh(
@@ -145,7 +233,6 @@ class ApprovalView(discord.ui.View):
             ticket_id=ticket["id"],
         )
 
-        # Disable the buttons on this message
         for child in self.children:
             child.disabled = True
 
@@ -158,7 +245,6 @@ class ApprovalView(discord.ui.View):
             view=self,
         )
 
-        # Audit log
         event_type = "refresh_extended" if is_extension else "refresh_approved"
         await audit_log.log_event(
             interaction.client,
@@ -173,16 +259,14 @@ class ApprovalView(discord.ui.View):
             },
         )
 
-        # Reschedule the membership reminders for this ticket (AFK timer, expiry, blacklist)
+        # Schedule reminders for the new AFK window
         membership = interaction.client.get_cog("Membership")
         if membership is not None:
             membership.schedule_for_ticket(ticket["id"])
 
-        # Reschedule the in-game buff timer (1h pre_alert/post_check pings)
-        # because every approved refresh resets the buff to 1h in-game
+        # Reschedule the in-game buff timer (the refresh just reset the buff to 1h)
         scheduler_cog = interaction.client.get_cog("Scheduler")
         if scheduler_cog is not None:
-            from datetime import datetime, timezone
             scheduler_cog.reschedule_after_refresh(datetime.now(timezone.utc))
 
         # DM the user
@@ -193,7 +277,7 @@ class ApprovalView(discord.ui.View):
                     f"Your AFK time now expires <t:{int(expires_at.timestamp())}:R>."
                 )
             except discord.DiscordException:
-                pass  # User has DMs closed; not a hard failure
+                pass
 
     @discord.ui.button(
         label="Reject",
@@ -219,24 +303,26 @@ class ApprovalView(discord.ui.View):
             )
             return
 
-        # Revert ticket back to WAITING_PROOF so the user can try again
+        # Always return the ticket to WAITING_PROOF so the user can retry
         database.set_ticket_status(ticket["id"], database.TICKET_WAITING_PROOF)
 
         for child in self.children:
             child.disabled = True
 
+        kind = "Robux balance" if ticket["phase"] == database.TICKET_PHASE_ROBUX else "refresh"
         await interaction.response.edit_message(
             content=(
                 f"❌ Rejected by {interaction.user.mention}. "
-                f"Please upload a clearer screenshot showing the refresh and the in-game time."
+                f"Please upload a clearer **{kind} screenshot**."
             ),
             view=self,
         )
 
         user = interaction.guild.get_member(ticket["user_id"])
+        event_type = "robux_rejected" if ticket["phase"] == database.TICKET_PHASE_ROBUX else "refresh_rejected"
         await audit_log.log_event(
             interaction.client,
-            "refresh_rejected",
+            event_type,
             user=user,
             mod=interaction.user,
             ticket_id=ticket["id"],
@@ -245,7 +331,7 @@ class ApprovalView(discord.ui.View):
         if user is not None:
             try:
                 await user.send(
-                    f"❌ Your screenshot was rejected by {interaction.user.display_name}. "
+                    f"❌ Your {kind} screenshot was rejected by {interaction.user.display_name}. "
                     f"Please upload a clearer one in the ticket."
                 )
             except discord.DiscordException:

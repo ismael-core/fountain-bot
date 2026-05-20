@@ -66,6 +66,7 @@ def init_db():
                 channel_id INTEGER NOT NULL,
                 server_id INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL,
+                phase TEXT NOT NULL DEFAULT 'robux',
                 created_at TIMESTAMP NOT NULL,
                 started_at TIMESTAMP,
                 expires_at TIMESTAMP,
@@ -112,6 +113,15 @@ def init_db():
             conn.execute("ALTER TABLE refreshes ADD COLUMN proof_url TEXT")
         if "ticket_id" not in cols:
             conn.execute("ALTER TABLE refreshes ADD COLUMN ticket_id INTEGER")
+
+        ticket_cols = [r[1] for r in conn.execute("PRAGMA table_info(tickets)").fetchall()]
+        if "phase" not in ticket_cols:
+            conn.execute("ALTER TABLE tickets ADD COLUMN phase TEXT NOT NULL DEFAULT 'robux'")
+
+
+# Phase values for the two-stage flow:
+TICKET_PHASE_ROBUX = "robux"      # waiting for Robux-balance screenshot
+TICKET_PHASE_REFRESH = "refresh"  # Robux verified, now in the refresh loop
 
 
 # ====================================================================
@@ -257,6 +267,14 @@ def set_ticket_status(ticket_id: int, status: str):
         conn.execute(
             "UPDATE tickets SET status = ? WHERE id = ?",
             (status, ticket_id),
+        )
+
+
+def set_ticket_phase(ticket_id: int, phase: str):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE tickets SET phase = ? WHERE id = ?",
+            (phase, ticket_id),
         )
 
 

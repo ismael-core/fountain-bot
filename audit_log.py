@@ -19,6 +19,8 @@ log = logging.getLogger("fountain.audit")
 _COLORS = {
     "ticket_started": discord.Color.blue(),
     "proof_uploaded": discord.Color.light_grey(),
+    "robux_verified": discord.Color.gold(),
+    "robux_rejected": discord.Color.orange(),
     "refresh_approved": discord.Color.green(),
     "refresh_rejected": discord.Color.orange(),
     "refresh_extended": discord.Color.teal(),

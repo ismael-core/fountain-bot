@@ -6,7 +6,7 @@ from discord.ext import commands
 
 import config
 import database
-from views import ApprovalView, StartTicketView
+from views import ApprovalView, RobuxVerifyView, StartTicketView
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +36,7 @@ class FountainBot(commands.Bot):
         await self.load_extension("cogs.membership")
 
         # Register persistent views so buttons keep working after restarts
+        self.add_view(RobuxVerifyView())
         self.add_view(StartTicketView())
         self.add_view(ApprovalView())
 
