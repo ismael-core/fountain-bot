@@ -39,52 +39,6 @@ class Admin(commands.Cog):
             f"✅ Cleared **{deleted}** refresh entries."
         )
 
-    @reset_group.command(
-        name="slots",
-        description="Delete all slot assignments (irreversible)",
-    )
-    @app_commands.describe(confirm="Set to True to actually reset")
-    async def reset_slots(
-        self,
-        interaction: discord.Interaction,
-        confirm: bool = False,
-    ):
-        if not confirm:
-            await interaction.response.send_message(
-                "⚠️ This will delete **ALL** slot assignments. "
-                "Run `/reset slots confirm:True` to confirm.",
-                ephemeral=True,
-            )
-            return
-
-        deleted = database.clear_slots()
-        await interaction.response.send_message(
-            f"✅ Cleared **{deleted}** slot assignments."
-        )
-
-    @reset_group.command(
-        name="all",
-        description="Delete ALL data: refreshes AND slots (irreversible)",
-    )
-    @app_commands.describe(confirm="Set to True to actually reset everything")
-    async def reset_all(
-        self,
-        interaction: discord.Interaction,
-        confirm: bool = False,
-    ):
-        if not confirm:
-            await interaction.response.send_message(
-                "⚠️ This will delete **EVERYTHING** (refreshes AND slots). "
-                "Run `/reset all confirm:True` to confirm.",
-                ephemeral=True,
-            )
-            return
-
-        refreshes, slots = database.clear_all()
-        await interaction.response.send_message(
-            f"✅ Cleared **{refreshes}** refreshes and **{slots}** slot assignments."
-        )
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Admin(bot))

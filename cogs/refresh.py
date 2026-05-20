@@ -1,9 +1,13 @@
-"""Commands related to logging refreshes and viewing stats."""
+"""Refresh logging, leaderboard, personal stats, and buff status."""
+from datetime import datetime, timedelta, timezone
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import database
+
+BUFF_DURATION = timedelta(hours=1)
 
 
 class Refresh(commands.Cog):
@@ -16,9 +20,16 @@ class Refresh(commands.Cog):
     )
     async def refresh(self, interaction: discord.Interaction):
         ts = database.log_refresh(interaction.user.id, str(interaction.user))
+
+        # Reschedule pre-alert and post-check from this new refresh
+        scheduler_cog = self.bot.get_cog("Scheduler")
+        if scheduler_cog is not None:
+            scheduler_cog.reschedule_after_refresh(ts)
+
+        expires_at = ts + BUFF_DURATION
         await interaction.response.send_message(
-            f"✅ Refresh logged for {interaction.user.mention} at "
-            f"<t:{int(ts.timestamp())}:T>"
+            f"✅ Refresh logged for {interaction.user.mention}. "
+            f"Buff expires <t:{int(expires_at.timestamp())}:R>."
         )
 
     @app_commands.command(
@@ -68,6 +79,39 @@ class Refresh(commands.Cog):
             f"This month: **{s['month']}** refreshes\n"
             f"All-time: **{s['total']}** refreshes",
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="buff_status",
+        description="Show the current buff status (time remaining)",
+    )
+    async def buff_status(self, interaction: discord.Interaction):
+        last = database.get_last_refresh()
+        if last is None:
+            await interaction.response.send_message(
+                "No refreshes logged yet. Use `/refresh` to start the cycle."
+            )
+            return
+
+        last_ts = last["timestamp"]
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=timezone.utc)
+
+        expires_at = last_ts + BUFF_DURATION
+        now = datetime.now(timezone.utc)
+
+        if expires_at <= now:
+            await interaction.response.send_message(
+                f"❌ Buff is **down**. Last refresh was by <@{last['user_id']}> "
+                f"<t:{int(last_ts.timestamp())}:R>. Someone refresh!",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        await interaction.response.send_message(
+            f"🟢 Buff is **active**. Expires <t:{int(expires_at.timestamp())}:R> "
+            f"(last refresh by <@{last['user_id']}>).",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
 

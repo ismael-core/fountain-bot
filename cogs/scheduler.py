@@ -1,4 +1,9 @@
-"""Scheduled jobs: pre-ping the assigned user and alert on missed refreshes."""
+"""Dynamic scheduler: pre-alerts and post-checks based on the last refresh.
+
+Each time /refresh runs we reschedule:
+  - pre_alert at (refresh + 1h - PRE_PING_MINUTES)  -> "buff expires soon"
+  - post_check at (refresh + 1h + ALERT_DELAY_MINUTES) -> "no refresh logged, buff down"
+"""
 import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -6,14 +11,15 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 import config
 import database
 
 log = logging.getLogger("fountain.scheduler")
 
-DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+BUFF_DURATION = timedelta(hours=1)
+PRE_ALERT_ID = "pre_alert"
+POST_CHECK_ID = "post_check"
 
 
 class Scheduler(commands.Cog):
@@ -23,26 +29,10 @@ class Scheduler(commands.Cog):
         self.scheduler = AsyncIOScheduler(timezone=self.tz)
 
     async def cog_load(self):
-        pre_ping_minute = 60 - config.PRE_PING_MINUTES
-        self.scheduler.add_job(
-            self.pre_ping_next_slot,
-            CronTrigger(minute=pre_ping_minute, timezone=self.tz),
-            id="pre_ping",
-            misfire_grace_time=60,
-        )
-        self.scheduler.add_job(
-            self.check_missed_refresh,
-            CronTrigger(minute=config.ALERT_DELAY_MINUTES, timezone=self.tz),
-            id="post_check",
-            misfire_grace_time=60,
-        )
         self.scheduler.start()
-        log.info(
-            "Scheduler started. Pre-ping at :%02d, post-check at :%02d (tz=%s)",
-            pre_ping_minute,
-            config.ALERT_DELAY_MINUTES,
-            config.TIMEZONE,
-        )
+        log.info("Scheduler started (tz=%s)", config.TIMEZONE)
+        # On startup, reschedule based on the last known refresh (if any and still relevant)
+        self._reschedule_from_last_refresh()
 
     async def cog_unload(self):
         self.scheduler.shutdown(wait=False)
@@ -53,63 +43,93 @@ class Scheduler(commands.Cog):
             log.warning("Channel %s not found", config.CHANNEL_ID)
         return ch
 
-    async def pre_ping_next_slot(self):
-        """Ping the user assigned to the upcoming hour."""
-        now_local = datetime.now(self.tz)
-        # The next hour we're about to enter
-        next_hour_dt = (
-            now_local + timedelta(minutes=config.PRE_PING_MINUTES + 1)
-        ).replace(minute=0, second=0, microsecond=0)
+    # ---------- Public API used from /refresh ----------
 
-        day = next_hour_dt.weekday()
-        hour = next_hour_dt.hour
+    def reschedule_after_refresh(self, refresh_time_utc: datetime):
+        """Cancel any pending jobs and schedule fresh ones for this refresh."""
+        pre_alert_at = refresh_time_utc + BUFF_DURATION - timedelta(minutes=config.PRE_PING_MINUTES)
+        post_check_at = refresh_time_utc + BUFF_DURATION + timedelta(minutes=config.ALERT_DELAY_MINUTES)
 
-        slot = database.get_slot_for(day, hour)
-        channel = self._channel()
-        if channel is None:
-            return
+        self._safe_add(PRE_ALERT_ID, self.pre_alert, pre_alert_at)
+        self._safe_add(POST_CHECK_ID, self.post_check, post_check_at)
 
-        if slot is None:
-            await channel.send(
-                f"⚠️ **Uncovered slot**: {DAY_NAMES[day]} {hour:02d}:00 "
-                f"(in {config.PRE_PING_MINUTES} min). If anyone wants to take it, "
-                f"use `/refresh` when the hour starts."
-            )
-            return
-
-        await channel.send(
-            f"⏰ <@{slot['user_id']}>, you're up for the **{hour:02d}:00** refresh "
-            f"(in {config.PRE_PING_MINUTES} min). Use `/refresh` when you do it."
+        log.info(
+            "Rescheduled: pre_alert at %s, post_check at %s",
+            pre_alert_at.isoformat(),
+            post_check_at.isoformat(),
         )
 
-    async def check_missed_refresh(self):
-        """If the current hour started but no refresh was logged, post an alert."""
-        now_local = datetime.now(self.tz)
-        hour_start_local = now_local.replace(minute=0, second=0, microsecond=0)
-        hour_start_utc = hour_start_local.astimezone(timezone.utc)
+    # ---------- Internals ----------
 
-        if database.has_refresh_since(hour_start_utc):
+    def _safe_add(self, job_id: str, func, when_utc: datetime):
+        """Add a date-triggered job, replacing any existing job with the same id.
+        If the time has already passed, skip silently.
+        """
+        now = datetime.now(timezone.utc)
+        if when_utc <= now:
+            # Time already passed; don't schedule something in the past.
+            return
+        self.scheduler.add_job(
+            func,
+            "date",
+            run_date=when_utc,
+            id=job_id,
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+
+    def _reschedule_from_last_refresh(self):
+        """On bot startup, if the last refresh is recent enough, reschedule jobs."""
+        last = database.get_last_refresh()
+        if last is None:
+            log.info("No previous refreshes found; waiting for the first /refresh.")
             return
 
-        day = hour_start_local.weekday()
-        hour = hour_start_local.hour
-        slot = database.get_slot_for(day, hour)
+        last_ts = last["timestamp"]
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=timezone.utc)
 
+        # If the buff already expired more than ALERT_DELAY_MINUTES ago, nothing to schedule
+        expiry = last_ts + BUFF_DURATION
+        now = datetime.now(timezone.utc)
+        if now > expiry + timedelta(minutes=config.ALERT_DELAY_MINUTES):
+            log.info("Last refresh too old to reschedule; waiting for /refresh.")
+            return
+
+        self.reschedule_after_refresh(last_ts)
+
+    # ---------- Job handlers ----------
+
+    async def pre_alert(self):
+        """Fires shortly before the current buff is about to expire."""
+        channel = self._channel()
+        if channel is None:
+            return
+        await channel.send(
+            f"🔔 **Fountain buff expires in {config.PRE_PING_MINUTES} min.** "
+            f"Anyone available, use `/refresh` when you do it."
+        )
+
+    async def post_check(self):
+        """Fires shortly after the buff should have been renewed."""
+        last = database.get_last_refresh()
         channel = self._channel()
         if channel is None:
             return
 
-        if slot:
-            await channel.send(
-                f"🚨 No refresh logged for **{hour:02d}:00**. "
-                f"<@{slot['user_id']}> had this slot — can you cover it, "
-                f"or someone take over?"
-            )
-        else:
-            await channel.send(
-                f"🚨 No refresh logged for **{hour:02d}:00** "
-                f"and this slot has no one assigned. Anyone able to cover?"
-            )
+        now = datetime.now(timezone.utc)
+        if last is not None:
+            last_ts = last["timestamp"]
+            if last_ts.tzinfo is None:
+                last_ts = last_ts.replace(tzinfo=timezone.utc)
+            # If the most recent refresh is newer than (now - ALERT_DELAY_MINUTES), buff is fine
+            if last_ts >= now - timedelta(minutes=config.ALERT_DELAY_MINUTES + 1):
+                return
+
+        await channel.send(
+            "🚨 **No refresh was logged.** The Fountain buff is down — anyone "
+            "who can refresh, please do it and run `/refresh`."
+        )
 
 
 async def setup(bot: commands.Bot):

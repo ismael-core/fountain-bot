@@ -1,6 +1,6 @@
 """SQLite database layer for the Fountain bot.
 
-Stores refresh logs and weekly slot assignments. All timestamps are UTC.
+Stores refresh logs only. All timestamps are UTC.
 """
 import sqlite3
 from contextlib import contextmanager
@@ -41,18 +41,8 @@ def init_db():
                 timestamp TIMESTAMP NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS slots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
-                hour INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
-                UNIQUE(day_of_week, hour)
-            );
-
             CREATE INDEX IF NOT EXISTS idx_refreshes_timestamp ON refreshes(timestamp);
             CREATE INDEX IF NOT EXISTS idx_refreshes_user ON refreshes(user_id);
-            CREATE INDEX IF NOT EXISTS idx_slots_user ON slots(user_id);
         """)
 
 
@@ -67,6 +57,16 @@ def log_refresh(user_id: int, username: str) -> datetime:
             (user_id, username, ts),
         )
     return ts
+
+
+def get_last_refresh() -> Optional[dict]:
+    """Return the most recent refresh, or None if there are no refreshes."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT user_id, username, timestamp FROM refreshes "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def has_refresh_since(since_utc: datetime) -> bool:
@@ -119,65 +119,6 @@ def get_user_stats(user_id: int) -> dict:
     return {"total": total, "week": week, "month": month}
 
 
-# ---------- Slot operations ----------
-
-def add_slot(user_id: int, username: str, day_of_week: int, hour: int) -> bool:
-    """Assign user to a weekly slot. Returns False if the slot is taken."""
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT 1 FROM slots WHERE day_of_week = ? AND hour = ?",
-            (day_of_week, hour),
-        ).fetchone()
-        if existing:
-            return False
-        conn.execute(
-            "INSERT INTO slots (user_id, username, day_of_week, hour) VALUES (?, ?, ?, ?)",
-            (user_id, username, day_of_week, hour),
-        )
-    return True
-
-
-def remove_slot(user_id: int, day_of_week: int, hour: int) -> bool:
-    """Remove a slot owned by the given user. Returns True if a row was deleted."""
-    with get_connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM slots WHERE user_id = ? AND day_of_week = ? AND hour = ?",
-            (user_id, day_of_week, hour),
-        )
-        return cur.rowcount > 0
-
-
-def get_all_slots() -> list[dict]:
-    """Return all slots ordered by day and hour."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT user_id, username, day_of_week, hour "
-            "FROM slots ORDER BY day_of_week, hour"
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_user_slots(user_id: int) -> list[dict]:
-    """Return all slots assigned to a user."""
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT day_of_week, hour FROM slots "
-            "WHERE user_id = ? ORDER BY day_of_week, hour",
-            (user_id,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_slot_for(day_of_week: int, hour: int) -> Optional[dict]:
-    """Return the user assigned to a specific slot, or None."""
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT user_id, username FROM slots WHERE day_of_week = ? AND hour = ?",
-            (day_of_week, hour),
-        ).fetchone()
-    return dict(row) if row else None
-
-
 # ---------- Admin / cleanup operations ----------
 
 def clear_refreshes() -> int:
@@ -185,18 +126,3 @@ def clear_refreshes() -> int:
     with get_connection() as conn:
         cursor = conn.execute("DELETE FROM refreshes")
         return cursor.rowcount
-
-
-def clear_slots() -> int:
-    """Delete all slot assignments. Returns number of rows deleted."""
-    with get_connection() as conn:
-        cursor = conn.execute("DELETE FROM slots")
-        return cursor.rowcount
-
-
-def clear_all() -> tuple[int, int]:
-    """Delete all refreshes and slots. Returns (refreshes_deleted, slots_deleted)."""
-    with get_connection() as conn:
-        c1 = conn.execute("DELETE FROM refreshes")
-        c2 = conn.execute("DELETE FROM slots")
-        return c1.rowcount, c2.rowcount

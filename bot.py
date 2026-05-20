@@ -24,7 +24,6 @@ class FountainBot(commands.Bot):
     async def setup_hook(self):
         database.init_db()
         await self.load_extension("cogs.refresh")
-        await self.load_extension("cogs.slots")
         await self.load_extension("cogs.scheduler")
         await self.load_extension("cogs.admin")
 
