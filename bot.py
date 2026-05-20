@@ -6,7 +6,6 @@ from discord.ext import commands
 
 import config
 import database
-from views import RefreshView
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,9 +26,6 @@ class FountainBot(commands.Bot):
         await self.load_extension("cogs.refresh")
         await self.load_extension("cogs.scheduler")
         await self.load_extension("cogs.admin")
-
-        # Register persistent views so buttons keep working after a restart
-        self.add_view(RefreshView())
 
         # Sync slash commands to a single guild — instant, no 1-hour propagation
         guild = discord.Object(id=config.GUILD_ID)

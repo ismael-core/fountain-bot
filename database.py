@@ -38,23 +38,29 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 username TEXT NOT NULL,
-                timestamp TIMESTAMP NOT NULL
+                timestamp TIMESTAMP NOT NULL,
+                proof_url TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_refreshes_timestamp ON refreshes(timestamp);
             CREATE INDEX IF NOT EXISTS idx_refreshes_user ON refreshes(user_id);
         """)
+        # Migration: add proof_url column for older DBs that don't have it yet
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(refreshes)").fetchall()]
+        if "proof_url" not in cols:
+            conn.execute("ALTER TABLE refreshes ADD COLUMN proof_url TEXT")
 
 
 # ---------- Refresh operations ----------
 
-def log_refresh(user_id: int, username: str) -> datetime:
+def log_refresh(user_id: int, username: str, proof_url: str) -> datetime:
     """Insert a refresh log entry and return its UTC timestamp."""
     ts = utc_now()
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO refreshes (user_id, username, timestamp) VALUES (?, ?, ?)",
-            (user_id, username, ts),
+            "INSERT INTO refreshes (user_id, username, timestamp, proof_url) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, username, ts, proof_url),
         )
     return ts
 

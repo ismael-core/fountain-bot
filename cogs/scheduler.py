@@ -14,7 +14,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
 import database
-from views import RefreshView
 
 log = logging.getLogger("fountain.scheduler")
 
@@ -108,8 +107,7 @@ class Scheduler(commands.Cog):
             return
         await channel.send(
             f"🔔 **Fountain buff expires in {config.PRE_PING_MINUTES} min.** "
-            f"Tap the button or use `/refresh` once you do it.",
-            view=RefreshView(),
+            f"Anyone available, run `/refresh` with a screenshot once you do it."
         )
 
     async def post_check(self):
@@ -129,9 +127,8 @@ class Scheduler(commands.Cog):
                 return
 
         await channel.send(
-            "🚨 **No refresh was logged.** The Fountain buff is down — tap "
-            "the button or use `/refresh` once you've done it.",
-            view=RefreshView(),
+            "🚨 **No refresh was logged.** The Fountain buff is down — please "
+            "refresh and use `/refresh` with a screenshot once you've done it."
         )
 
 
