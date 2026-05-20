@@ -176,3 +176,27 @@ def get_slot_for(day_of_week: int, hour: int) -> Optional[dict]:
             (day_of_week, hour),
         ).fetchone()
     return dict(row) if row else None
+
+
+# ---------- Admin / cleanup operations ----------
+
+def clear_refreshes() -> int:
+    """Delete all refresh entries. Returns number of rows deleted."""
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM refreshes")
+        return cursor.rowcount
+
+
+def clear_slots() -> int:
+    """Delete all slot assignments. Returns number of rows deleted."""
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM slots")
+        return cursor.rowcount
+
+
+def clear_all() -> tuple[int, int]:
+    """Delete all refreshes and slots. Returns (refreshes_deleted, slots_deleted)."""
+    with get_connection() as conn:
+        c1 = conn.execute("DELETE FROM refreshes")
+        c2 = conn.execute("DELETE FROM slots")
+        return c1.rowcount, c2.rowcount
