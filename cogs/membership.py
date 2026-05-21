@@ -101,10 +101,12 @@ class Membership(commands.Cog):
         channel = self.bot.get_channel(ticket["channel_id"])
         user = await self._fetch_user(ticket["user_id"])
 
+        expires_ts = int(ticket["expires_at"].timestamp())
         text = (
             f"⏰ Heads up <@{ticket['user_id']}>, your AFK time runs out in "
-            f"**{minutes_left} min** (<t:{int(ticket['expires_at'].timestamp())}:R>). "
-            f"Refresh again with a new screenshot in this ticket if you want to extend."
+            f"**{minutes_left} min** (at <t:{expires_ts}:t> your local time, "
+            f"<t:{expires_ts}:R>). "
+            f"Upload a new refresh screenshot in this ticket if you want to extend."
         )
 
         if channel is not None:
@@ -116,7 +118,8 @@ class Membership(commands.Cog):
         if user is not None:
             try:
                 await user.send(
-                    f"⏰ Your Fountain AFK time runs out in {minutes_left} min. "
+                    f"⏰ Your Fountain AFK time runs out in {minutes_left} min "
+                    f"(at <t:{expires_ts}:t> your local time). "
                     f"Send a new screenshot in your ticket if you want to extend."
                 )
             except discord.DiscordException:

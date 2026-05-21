@@ -228,6 +228,13 @@ def clear_refreshes() -> int:
         return cursor.rowcount
 
 
+def clear_refreshes_for_user(user_id: int) -> int:
+    """Delete refresh entries for a single user only. Returns rows deleted."""
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM refreshes WHERE user_id = ?", (user_id,))
+        return cursor.rowcount
+
+
 # ====================================================================
 # Tickets
 # ====================================================================

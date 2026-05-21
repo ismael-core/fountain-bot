@@ -240,12 +240,24 @@ class ApprovalView(discord.ui.View):
         else:
             next_view = None  # max reached, no more refreshes possible
 
+        expires_ts = int(expires_at.timestamp())
+        approval_text = (
+            f"✅ Approved by {interaction.user.mention}.\n"
+            f"⏰ Your AFK time expires on **<t:{expires_ts}:F>** (<t:{expires_ts}:R>).\n"
+            f"📊 Refreshes used: **{refreshes_used}/{config.MAX_REFRESHES_PER_TICKET}**.\n"
+        )
+        if next_view is not None:
+            approval_text += (
+                f"💡 To extend before expiry, tap the button below and upload a new screenshot. "
+                f"You'll get reminders 30 / 10 / 5 min before expiry."
+            )
+        else:
+            approval_text += (
+                f"⛔ This ticket reached the max refreshes. After this expires you'll need a new ticket."
+            )
+
         await interaction.response.edit_message(
-            content=(
-                f"✅ Approved by {interaction.user.mention}. "
-                f"AFK time now expires <t:{int(expires_at.timestamp())}:R> "
-                f"({refreshes_used}/{config.MAX_REFRESHES_PER_TICKET} refreshes used)."
-            ),
+            content=approval_text,
             view=next_view,
         )
 
