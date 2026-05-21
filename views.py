@@ -147,11 +147,12 @@ class ApprovalView(discord.ui.View):
             await self._approve_refresh(interaction, ticket)
 
     async def _approve_robux(self, interaction: discord.Interaction, ticket: dict):
-        """Approve the Robux verification step and post the game link next."""
-        # Move ticket to refresh phase, status back to CREATED so the user
-        # can click the new 'Send proof' button.
+        """Approve the Robux verification step and post the game link next.
+        No button is attached — the user just uploads the refresh screenshot
+        directly and the on_message listener picks it up."""
+        # Move ticket to refresh phase, status straight to WAITING_PROOF (no button needed)
         database.set_ticket_phase(ticket["id"], database.TICKET_PHASE_REFRESH)
-        database.set_ticket_status(ticket["id"], database.TICKET_CREATED)
+        database.set_ticket_status(ticket["id"], database.TICKET_WAITING_PROOF)
 
         # Disable this approval message
         for child in self.children:
@@ -175,8 +176,8 @@ class ApprovalView(discord.ui.View):
                 f"💧 {user_mention}\n\n"
                 f"Your Robux balance is verified. Now do the refresh in-game.\n\n"
                 f"**Game link:** {game_link}\n\n"
-                f"When you've done it, tap the button below and upload the screenshot "
-                f"showing the refresh and the in-game time."
+                f"📸 **When you've done it, upload the screenshot of the refresh "
+                f"directly in this channel.** I'll detect it and forward it to the mods."
             ),
             color=discord.Color.blue(),
         )
@@ -185,7 +186,6 @@ class ApprovalView(discord.ui.View):
         await interaction.followup.send(
             content=user_mention,
             embed=embed,
-            view=StartTicketView(),
         )
 
         await audit_log.log_event(
