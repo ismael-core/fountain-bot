@@ -28,6 +28,10 @@ _COLORS = {
     "blacklisted": discord.Color.red(),
     "unbanned": discord.Color.purple(),
     "link_updated": discord.Color.dark_grey(),
+    "mod_app_started": discord.Color.blue(),
+    "mod_app_completed": discord.Color.gold(),
+    "mod_app_approved": discord.Color.green(),
+    "mod_app_rejected": discord.Color.orange(),
 }
 
 

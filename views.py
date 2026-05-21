@@ -340,3 +340,139 @@ class ApprovalView(discord.ui.View):
                 )
             except discord.DiscordException:
                 pass
+
+
+# ====================================================================
+# ModApplicationReviewView — for reviewing moderator applications
+# ====================================================================
+
+class ModApplicationReviewView(discord.ui.View):
+    """Approve/Reject buttons shown on the final review embed for a moderator
+    application. Only users with the Admin (Management) role can act on them."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    def _is_admin(self, member: discord.Member) -> bool:
+        if not isinstance(member, discord.Member):
+            return False
+        return any(r.id == config.ADMIN_ROLE_ID for r in member.roles)
+
+    @discord.ui.button(
+        label="Approve",
+        style=discord.ButtonStyle.success,
+        custom_id="modapp_approve",
+        emoji="✅",
+    )
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Management can review moderator applications.",
+                ephemeral=True,
+            )
+            return
+
+        app = database.get_mod_application_by_channel(interaction.channel_id)
+        if app is None:
+            await interaction.response.send_message(
+                "❌ No application found for this channel.", ephemeral=True
+            )
+            return
+
+        if app["status"] in (database.MOD_APP_APPROVED, database.MOD_APP_REJECTED):
+            await interaction.response.send_message(
+                f"⚠️ This application was already reviewed (status: {app['status']}).",
+                ephemeral=True,
+            )
+            return
+
+        database.review_mod_application(app["id"], interaction.user.id, approved=True)
+
+        # Disable buttons
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content=f"✅ Application approved by {interaction.user.mention}.",
+            view=self,
+        )
+
+        user = interaction.guild.get_member(app["user_id"])
+        if user is not None:
+            try:
+                await user.send(
+                    "✅ Your moderator application has been **approved**! "
+                    "An admin will reach out shortly with next steps."
+                )
+            except discord.DiscordException:
+                pass
+
+        await audit_log.log_event(
+            interaction.client,
+            "mod_app_approved",
+            user=user,
+            mod=interaction.user,
+            ticket_id=app["id"],  # reusing ticket_id col for app id
+        )
+
+    @discord.ui.button(
+        label="Reject",
+        style=discord.ButtonStyle.danger,
+        custom_id="modapp_reject",
+        emoji="❌",
+    )
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Management can review moderator applications.",
+                ephemeral=True,
+            )
+            return
+
+        app = database.get_mod_application_by_channel(interaction.channel_id)
+        if app is None:
+            await interaction.response.send_message(
+                "❌ No application found for this channel.", ephemeral=True
+            )
+            return
+
+        if app["status"] in (database.MOD_APP_APPROVED, database.MOD_APP_REJECTED):
+            await interaction.response.send_message(
+                f"⚠️ This application was already reviewed (status: {app['status']}).",
+                ephemeral=True,
+            )
+            return
+
+        database.review_mod_application(app["id"], interaction.user.id, approved=False)
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content=f"❌ Application rejected by {interaction.user.mention}. Closing ticket in 30 seconds.",
+            view=self,
+        )
+
+        user = interaction.guild.get_member(app["user_id"])
+        if user is not None:
+            try:
+                await user.send(
+                    "❌ Your moderator application was not accepted at this time. "
+                    "Thanks for your interest! You're welcome to apply again in the future."
+                )
+            except discord.DiscordException:
+                pass
+
+        await audit_log.log_event(
+            interaction.client,
+            "mod_app_rejected",
+            user=user,
+            mod=interaction.user,
+            ticket_id=app["id"],
+        )
+
+        # Wait 30s then delete the channel
+        import asyncio
+        await asyncio.sleep(30)
+        try:
+            await interaction.channel.delete(reason=f"Mod application rejected by {interaction.user}")
+        except discord.DiscordException:
+            log.exception("Failed to delete mod application channel %s", interaction.channel_id)

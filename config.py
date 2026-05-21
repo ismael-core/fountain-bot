@@ -13,10 +13,12 @@ MANAGEMENT_CHANNEL_ID = int(os.getenv("MANAGEMENT_CHANNEL_ID", "0"))
 LOGS_CHANNEL_ID = int(os.getenv("LOGS_CHANNEL_ID", "0"))
 BLACKLIST_CHANNEL_ID = int(os.getenv("BLACKLIST_CHANNEL_ID", "0"))  # optional
 TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0"))
+MOD_TICKET_CATEGORY_ID = int(os.getenv("MOD_TICKET_CATEGORY_ID", "0"))  # category for mod-recruitment applications
 MOD_ROLE_ID = int(os.getenv("MOD_ROLE_ID", "0"))
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 DEVELOPER_ROLE_ID = int(os.getenv("DEVELOPER_ROLE_ID", "0"))
 OWNER_ROLE_ID = int(os.getenv("OWNER_ROLE_ID", "0"))  # optional, for a custom Owner role
+BLOXLINK_VERIFIED_ROLE_ID = int(os.getenv("BLOXLINK_VERIFIED_ROLE_ID", "0"))  # optional, shown in mod application summary
 
 # Roles immune from being blacklisted. Defaults to admin + developer + mod
 # + owner so staff can never accidentally lock themselves out of their own server.

@@ -99,12 +99,36 @@ def init_db():
                 created_at TIMESTAMP NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS mod_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL,
+                current_question INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL,
+                completed_at TIMESTAMP,
+                reviewed_by INTEGER,
+                reviewed_at TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS mod_application_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                application_id INTEGER NOT NULL,
+                question_index INTEGER NOT NULL,
+                question_text TEXT NOT NULL,
+                answer_text TEXT NOT NULL,
+                answered_at TIMESTAMP NOT NULL,
+                FOREIGN KEY (application_id) REFERENCES mod_applications(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_refreshes_timestamp ON refreshes(timestamp);
             CREATE INDEX IF NOT EXISTS idx_refreshes_user ON refreshes(user_id);
             CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
             CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
             CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
             CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log_entries(created_at);
+            CREATE INDEX IF NOT EXISTS idx_modapp_channel ON mod_applications(channel_id);
+            CREATE INDEX IF NOT EXISTS idx_modapp_user ON mod_applications(user_id);
         """)
 
         # Migrations for older versions of the DB
@@ -483,3 +507,94 @@ def write_audit_entry(
             """,
             (event_type, user_id, mod_id, ticket_id, details_json, ts),
         )
+
+
+# ====================================================================
+# Mod-application helpers
+# ====================================================================
+
+# Status values for mod_applications:
+MOD_APP_ASKING = "asking"        # bot is still asking questions, waiting on user
+MOD_APP_COMPLETED = "completed"  # all questions answered, awaiting mod review
+MOD_APP_APPROVED = "approved"    # mod accepted the application
+MOD_APP_REJECTED = "rejected"    # mod rejected the application
+
+
+def create_mod_application(user_id: int, channel_id: int) -> int:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO mod_applications (user_id, channel_id, status, current_question, created_at)
+            VALUES (?, ?, ?, 0, ?)
+            """,
+            (user_id, channel_id, MOD_APP_ASKING, utc_now()),
+        )
+        return cursor.lastrowid
+
+
+def get_mod_application_by_channel(channel_id: int) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM mod_applications WHERE channel_id = ?",
+            (channel_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def save_mod_application_answer(application_id: int, question_index: int, question: str, answer: str):
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO mod_application_answers
+            (application_id, question_index, question_text, answer_text, answered_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (application_id, question_index, question, answer, utc_now()),
+        )
+
+
+def advance_mod_application_question(application_id: int, new_index: int):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE mod_applications SET current_question = ? WHERE id = ?",
+            (new_index, application_id),
+        )
+
+
+def complete_mod_application(application_id: int):
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE mod_applications
+            SET status = ?, completed_at = ?
+            WHERE id = ?
+            """,
+            (MOD_APP_COMPLETED, utc_now(), application_id),
+        )
+
+
+def review_mod_application(application_id: int, mod_id: int, approved: bool):
+    new_status = MOD_APP_APPROVED if approved else MOD_APP_REJECTED
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE mod_applications
+            SET status = ?, reviewed_by = ?, reviewed_at = ?
+            WHERE id = ?
+            """,
+            (new_status, mod_id, utc_now(), application_id),
+        )
+
+
+def get_mod_application_answers(application_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT question_index, question_text, answer_text, answered_at
+            FROM mod_application_answers
+            WHERE application_id = ?
+            ORDER BY question_index ASC
+            """,
+            (application_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
