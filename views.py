@@ -147,14 +147,13 @@ class ApprovalView(discord.ui.View):
             await self._approve_refresh(interaction, ticket)
 
     async def _approve_robux(self, interaction: discord.Interaction, ticket: dict):
-        """Approve the Robux verification step and post the game link next.
-        No button is attached — the user just uploads the refresh screenshot
-        directly and the on_message listener picks it up."""
-        # Move ticket to refresh phase, status straight to WAITING_PROOF (no button needed)
+        """Approve the Robux verification step and post the game link next,
+        with a 'Send proof' button so the user has a clear trigger to upload
+        their refresh screenshot."""
         database.set_ticket_phase(ticket["id"], database.TICKET_PHASE_REFRESH)
         database.set_ticket_status(ticket["id"], database.TICKET_WAITING_PROOF)
 
-        # Disable this approval message
+        # Disable this approval message's buttons
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
@@ -165,7 +164,6 @@ class ApprovalView(discord.ui.View):
             view=self,
         )
 
-        # Find the user and the game link
         user = interaction.guild.get_member(ticket["user_id"])
         game_link = database.get_config("game_link") or "(no link configured — admin must run /set_link)"
         user_mention = user.mention if user else f"<@{ticket['user_id']}>"
@@ -176,8 +174,7 @@ class ApprovalView(discord.ui.View):
                 f"💧 {user_mention}\n\n"
                 f"Your Robux balance is verified. Now do the refresh in-game.\n\n"
                 f"**Game link:** {game_link}\n\n"
-                f"📸 **When you've done it, upload the screenshot of the refresh "
-                f"directly in this channel.** I'll detect it and forward it to the mods."
+                f"When you've done the refresh, tap the button below and upload the screenshot."
             ),
             color=discord.Color.blue(),
         )
@@ -186,6 +183,7 @@ class ApprovalView(discord.ui.View):
         await interaction.followup.send(
             content=user_mention,
             embed=embed,
+            view=StartTicketView(),
         )
 
         await audit_log.log_event(
@@ -233,16 +231,22 @@ class ApprovalView(discord.ui.View):
             ticket_id=ticket["id"],
         )
 
-        for child in self.children:
-            child.disabled = True
+        # After approval, replace the Approve/Reject buttons with a "Send proof"
+        # button so the user can extend their AFK time later without scrolling up
+        # to find the original button. Only attach it if they still have refreshes left.
+        refreshes_used = ticket["refresh_count"] + 1
+        if refreshes_used < config.MAX_REFRESHES_PER_TICKET:
+            next_view = StartTicketView()
+        else:
+            next_view = None  # max reached, no more refreshes possible
 
         await interaction.response.edit_message(
             content=(
                 f"✅ Approved by {interaction.user.mention}. "
                 f"AFK time now expires <t:{int(expires_at.timestamp())}:R> "
-                f"({ticket['refresh_count'] + 1}/{config.MAX_REFRESHES_PER_TICKET} refreshes used)."
+                f"({refreshes_used}/{config.MAX_REFRESHES_PER_TICKET} refreshes used)."
             ),
-            view=self,
+            view=next_view,
         )
 
         event_type = "refresh_extended" if is_extension else "refresh_approved"

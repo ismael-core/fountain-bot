@@ -9,7 +9,7 @@ from discord.ext import commands
 import audit_log
 import config
 import database
-from views import ApprovalView
+from views import ApprovalView, StartTicketView
 
 log = logging.getLogger("fountain.tickets")
 
@@ -208,6 +208,93 @@ class Tickets(commands.Cog):
             mod=interaction.user,
             ticket_id=ticket_id,
             details={"channel_id": interaction.channel_id, "phase": "robux", "auto": False},
+        )
+
+    # ----------------------------------------------------------------
+    # /start_refresh — for OLD tickets where Robux verification doesn't apply
+    # ----------------------------------------------------------------
+
+    @app_commands.command(
+        name="start_refresh",
+        description="Start the refresh flow directly, skipping Robux verification (for old tickets)",
+    )
+    @app_commands.describe(user="The user who needs to refresh")
+    async def start_refresh(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+    ):
+        if not _in_ticket_category(interaction.channel):
+            await interaction.response.send_message(
+                "❌ This command only works inside a ticket channel.",
+                ephemeral=True,
+            )
+            return
+
+        if not _has_mod_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only mods can start the refresh flow.",
+                ephemeral=True,
+            )
+            return
+
+        if database.is_blacklisted(user.id):
+            entry = database.get_blacklist_entry(user.id)
+            until = "permanently" if entry["banned_until"] is None else f"until <t:{int(entry['banned_until'].timestamp())}:F>"
+            await interaction.response.send_message(
+                f"❌ {user.mention} is blacklisted {until} (strike {entry['strike_count']}).",
+                ephemeral=True,
+            )
+            return
+
+        game_link = database.get_config("game_link")
+        if not game_link:
+            await interaction.response.send_message(
+                f"❌ No game link configured. An admin needs to run `/set_link` "
+                f"in <#{config.MANAGEMENT_CHANNEL_ID}> first.",
+                ephemeral=True,
+            )
+            return
+
+        existing = database.get_ticket_by_channel(interaction.channel_id)
+        if existing and existing["status"] != database.TICKET_CLOSED:
+            await interaction.response.send_message(
+                f"⚠️ This channel already has an active ticket (#{existing['id']}, status: {existing['status']}). "
+                f"Close it first if you want to start over.",
+                ephemeral=True,
+            )
+            return
+
+        # Create the ticket directly in refresh phase + WAITING_PROOF status
+        ticket_id = database.create_ticket(user.id, interaction.channel_id)
+        database.set_ticket_phase(ticket_id, database.TICKET_PHASE_REFRESH)
+        database.set_ticket_status(ticket_id, database.TICKET_WAITING_PROOF)
+
+        embed = discord.Embed(
+            title="Now refresh the Fountain",
+            description=(
+                f"💧 {user.mention}\n\n"
+                f"**Game link:** {game_link}\n\n"
+                f"When you've done the refresh in-game, tap the button below and "
+                f"upload the screenshot showing the refresh."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text=f"Ticket #{ticket_id}")
+
+        await interaction.response.send_message(
+            content=user.mention,
+            embed=embed,
+            view=StartTicketView(),
+        )
+
+        await audit_log.log_event(
+            self.bot,
+            "ticket_started",
+            user=user,
+            mod=interaction.user,
+            ticket_id=ticket_id,
+            details={"channel_id": interaction.channel_id, "phase": "refresh", "skip_robux": True},
         )
 
     # ----------------------------------------------------------------
