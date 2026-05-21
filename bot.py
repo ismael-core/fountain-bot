@@ -15,9 +15,12 @@ logging.basicConfig(
 log = logging.getLogger("fountain")
 
 # Default intents + message content (required so the bot can read attachments
-# in messages users post in ticket channels for proof verification).
+# in messages users post in ticket channels for proof verification) + members
+# (required so guild.get_member() returns a Member with .roles, which we need
+# to check protected staff roles before blacklisting anyone).
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 
 class FountainBot(commands.Bot):

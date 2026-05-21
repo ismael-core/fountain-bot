@@ -444,6 +444,23 @@ def remove_from_blacklist(user_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+def list_blacklisted_users() -> list[dict]:
+    """Return all currently blacklisted users (active bans only).
+    A ban is active if banned_until is NULL (permanent) or in the future."""
+    now = utc_now()
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT user_id, banned_at, banned_until, strike_count, reason
+            FROM blacklist
+            WHERE banned_until IS NULL OR banned_until > ?
+            ORDER BY banned_at DESC
+            """,
+            (now,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ====================================================================
 # Audit log
 # ====================================================================

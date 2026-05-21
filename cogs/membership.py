@@ -171,20 +171,16 @@ class Membership(commands.Cog):
         if ticket is None or ticket["status"] != database.TICKET_EXPIRED_GRACE:
             return
 
-        user = await self._fetch_user(ticket["user_id"])
-
-        # Safety check: never blacklist staff (admins, devs, mods).
-        # If for any reason the flow tries to blacklist someone with a protected
-        # role, skip and just log it so it can be reviewed by hand.
-        if isinstance(user, discord.Member) and any(
-            r.id in config.PROTECTED_ROLE_IDS for r in user.roles
-        ):
+        # Hard guard: never blacklist server owner or anyone with a staff role.
+        # Checked at execution time even if it was checked at scheduling time,
+        # because roles can change between then and now.
+        if await self._is_protected(ticket["user_id"]):
             database.set_ticket_status(ticket_id, database.TICKET_CLOSED)
             channel = self.bot.get_channel(ticket["channel_id"])
             if channel is not None:
                 try:
                     await channel.send(
-                        f"⚠️ {user.mention} has a protected staff role — skipping blacklist. "
+                        f"⚠️ <@{ticket['user_id']}> has a protected role — skipping blacklist. "
                         f"Ticket closed.",
                         allowed_mentions=discord.AllowedMentions(users=False),
                     )
@@ -193,11 +189,13 @@ class Membership(commands.Cog):
             await audit_log.log_event(
                 self.bot,
                 "blacklisted",
-                user=user,
+                user=await self._fetch_user(ticket["user_id"]),
                 ticket_id=ticket_id,
-                details={"skipped": "user has protected staff role"},
+                details={"skipped": "user has protected role or is server owner"},
             )
             return
+
+        user = await self._fetch_user(ticket["user_id"])
 
         entry = database.add_blacklist_strike(
             ticket["user_id"],
@@ -279,17 +277,47 @@ class Membership(commands.Cog):
     # ----------------------------------------------------------------
 
     async def _fetch_user(self, user_id: int):
+        """Return a discord.Member if possible (so .roles is available);
+        fall back to a basic User only if the person has left the server."""
         guild = self.bot.get_guild(config.GUILD_ID)
         if guild is None:
             return None
         member = guild.get_member(user_id)
         if member is not None:
             return member
-        # Fallback to bot.fetch_user for users who left the guild
+        # Cache miss: ask Discord directly. This preserves .roles unlike fetch_user.
         try:
-            return await self.bot.fetch_user(user_id)
+            return await guild.fetch_member(user_id)
+        except discord.NotFound:
+            # User actually left the guild; fall back to a User (no roles)
+            try:
+                return await self.bot.fetch_user(user_id)
+            except discord.DiscordException:
+                return None
         except discord.DiscordException:
             return None
+
+    async def _is_protected(self, user_id: int) -> bool:
+        """True if the user has a protected staff role OR is the server owner.
+        Used as a hard guard before any blacklist action."""
+        guild = self.bot.get_guild(config.GUILD_ID)
+        if guild is None:
+            # Better to err on the side of NOT blacklisting if we can't verify
+            return True
+        if guild.owner_id == user_id:
+            return True
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.DiscordException:
+                # Can't verify roles right now → don't risk a wrong blacklist
+                log.warning(
+                    "Could not fetch member %s to verify protected role; skipping blacklist",
+                    user_id,
+                )
+                return True
+        return any(r.id in config.PROTECTED_ROLE_IDS for r in member.roles)
 
 
 async def setup(bot: commands.Bot):

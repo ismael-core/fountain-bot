@@ -16,11 +16,14 @@ TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0"))
 MOD_ROLE_ID = int(os.getenv("MOD_ROLE_ID", "0"))
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 DEVELOPER_ROLE_ID = int(os.getenv("DEVELOPER_ROLE_ID", "0"))
+OWNER_ROLE_ID = int(os.getenv("OWNER_ROLE_ID", "0"))  # optional, for a custom Owner role
 
 # Roles immune from being blacklisted. Defaults to admin + developer + mod
-# so staff can never accidentally lock themselves out of their own server.
+# + owner so staff can never accidentally lock themselves out of their own server.
+# The guild owner (Discord's built-in server owner) is also always protected,
+# checked separately in membership.py.
 PROTECTED_ROLE_IDS = list({
-    rid for rid in (ADMIN_ROLE_ID, DEVELOPER_ROLE_ID, MOD_ROLE_ID) if rid
+    rid for rid in (ADMIN_ROLE_ID, DEVELOPER_ROLE_ID, MOD_ROLE_ID, OWNER_ROLE_ID) if rid
 })
 
 # Roles that can run elevated commands like /set_link and /unban.

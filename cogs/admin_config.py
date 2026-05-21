@@ -146,6 +146,78 @@ class AdminConfig(commands.Cog):
                     log.exception("Failed to post unban to blacklist channel")
 
     # ----------------------------------------------------------------
+    # /cleanup_staff_blacklist — remove every staff member who was wrongly blacklisted
+    # ----------------------------------------------------------------
+
+    @app_commands.command(
+        name="cleanup_staff_blacklist",
+        description="Unban anyone with a protected staff role who got blacklisted by mistake (admins only)",
+    )
+    async def cleanup_staff_blacklist(self, interaction: discord.Interaction):
+        if not _has_admin_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only admins can run this.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        guild = interaction.guild
+        protected_ids = set(config.PROTECTED_ROLE_IDS)
+
+        cleaned = []
+        skipped = []
+        not_found = []
+
+        for entry in database.list_blacklisted_users():
+            uid = entry["user_id"]
+
+            # Is this user a server owner or do they have a protected role?
+            is_protected = False
+            if guild.owner_id == uid:
+                is_protected = True
+            else:
+                member = guild.get_member(uid)
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(uid)
+                    except discord.DiscordException:
+                        not_found.append(uid)
+                        continue
+                if any(r.id in protected_ids for r in member.roles):
+                    is_protected = True
+
+            if is_protected:
+                database.remove_from_blacklist(uid)
+                cleaned.append(uid)
+                await audit_log.log_event(
+                    self.bot,
+                    "unbanned",
+                    user=member if isinstance(member, discord.Member) else None,
+                    mod=interaction.user,
+                    details={
+                        "previous_strikes": entry["strike_count"],
+                        "reason": "cleanup_staff_blacklist: user has protected role",
+                    },
+                )
+            else:
+                skipped.append(uid)
+
+        lines = [f"✅ Cleanup done. **{len(cleaned)} staff member(s) unbanned.**"]
+        if cleaned:
+            lines.append("Unbanned: " + ", ".join(f"<@{u}>" for u in cleaned))
+        if skipped:
+            lines.append(f"Kept blacklisted (no protected role): {len(skipped)}")
+        if not_found:
+            lines.append(f"Could not check (left server): {len(not_found)}")
+
+        await interaction.followup.send(
+            "\n".join(lines),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions(users=False),
+        )
+
+    # ----------------------------------------------------------------
     # /queue — show the current waiting tickets
     # ----------------------------------------------------------------
 
