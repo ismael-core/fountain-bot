@@ -288,6 +288,13 @@ class Tickets(commands.Cog):
             view=StartTicketView(),
         )
 
+        # Pin so the user can always find the game link + button without scrolling
+        try:
+            msg = await interaction.original_response()
+            await msg.pin(reason="Pinning game-link message for ticket")
+        except discord.DiscordException:
+            log.exception("Failed to pin /start_refresh message in %s", interaction.channel_id)
+
         await audit_log.log_event(
             self.bot,
             "ticket_started",

@@ -167,6 +167,20 @@ class Membership(commands.Cog):
             details={"grace_minutes": config.GRACE_MINUTES},
         )
 
+        # Schedule auto-close X hours after expiry. If the user recovers
+        # (extends AFK), _auto_close_ticket will detect the ACTIVE status
+        # and skip deletion. Otherwise the channel is deleted to keep the
+        # category clean.
+        close_time = datetime.now(timezone.utc) + timedelta(hours=config.AUTO_CLOSE_HOURS_AFTER_EXPIRY)
+        self.scheduler.add_job(
+            self._auto_close_ticket,
+            "date",
+            run_date=close_time,
+            args=[ticket_id],
+            id=f"close_{ticket_id}",
+            replace_existing=True,
+        )
+
     async def _handle_blacklist(self, ticket_id: int):
         ticket = database.get_ticket(ticket_id)
         # Only blacklist if the ticket is still in EXPIRED_GRACE (mod hasn't manually closed it
@@ -225,6 +239,19 @@ class Membership(commands.Cog):
                 )
             except discord.DiscordException:
                 pass
+
+        # Revoke channel access for the user so they can no longer see the game link
+        # or upload anything in this ticket. They'll need to open a new ticket once
+        # their blacklist expires.
+        if channel is not None and isinstance(user, discord.Member):
+            try:
+                await channel.set_permissions(
+                    user,
+                    view_channel=False,
+                    reason=f"Blacklist applied (strike #{entry['strike_count']})",
+                )
+            except discord.DiscordException:
+                log.exception("Failed to revoke channel access for blacklisted user %s", user.id)
 
         if user is not None:
             try:
@@ -321,6 +348,42 @@ class Membership(commands.Cog):
                 )
                 return True
         return any(r.id in config.PROTECTED_ROLE_IDS for r in member.roles)
+
+    async def _auto_close_ticket(self, ticket_id: int):
+        """Delete the ticket channel X hours after AFK expiry if the user
+        never recovered. Skipped if the user extended (status went back to ACTIVE)
+        or the ticket was already closed by a mod."""
+        ticket = database.get_ticket(ticket_id)
+        if ticket is None:
+            return
+        # User recovered or already closed; nothing to do
+        if ticket["status"] in (database.TICKET_ACTIVE, database.TICKET_CLOSED):
+            return
+
+        channel = self.bot.get_channel(ticket["channel_id"])
+        if channel is None:
+            # Channel already gone for some reason; just mark closed in DB
+            database.set_ticket_status(ticket_id, database.TICKET_CLOSED)
+            return
+
+        database.set_ticket_status(ticket_id, database.TICKET_CLOSED)
+
+        await audit_log.log_event(
+            self.bot,
+            "ticket_closed",
+            user=await self._fetch_user(ticket["user_id"]),
+            ticket_id=ticket_id,
+            details={
+                "reason": f"auto-close: inactive {config.AUTO_CLOSE_HOURS_AFTER_EXPIRY}h after AFK expired",
+            },
+        )
+
+        try:
+            await channel.delete(
+                reason=f"Auto-close: inactive {config.AUTO_CLOSE_HOURS_AFTER_EXPIRY}h after AFK expired"
+            )
+        except discord.DiscordException:
+            log.exception("Failed to auto-close ticket channel %s", channel.id)
 
 
 async def setup(bot: commands.Bot):

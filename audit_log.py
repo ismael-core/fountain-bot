@@ -25,6 +25,7 @@ _COLORS = {
     "refresh_rejected": discord.Color.orange(),
     "refresh_extended": discord.Color.teal(),
     "ticket_expired": discord.Color.gold(),
+    "ticket_closed": discord.Color.dark_grey(),
     "blacklisted": discord.Color.red(),
     "unbanned": discord.Color.purple(),
     "link_updated": discord.Color.dark_grey(),

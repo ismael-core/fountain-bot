@@ -44,6 +44,7 @@ MAX_REFRESHES_PER_TICKET = int(os.getenv("MAX_REFRESHES_PER_TICKET", "4"))
 
 # Grace period (minutes) between AFK expiration and blacklisting
 GRACE_MINUTES = int(os.getenv("GRACE_MINUTES", "10"))
+AUTO_CLOSE_HOURS_AFTER_EXPIRY = int(os.getenv("AUTO_CLOSE_HOURS_AFTER_EXPIRY", "24"))
 
 # Comma-separated list of minutes before AFK expiration to send reminders
 PRE_EXPIRY_REMINDERS = [
