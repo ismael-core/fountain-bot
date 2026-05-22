@@ -6,7 +6,15 @@ from discord.ext import commands
 
 import config
 import database
-from views import ApprovalView, ModApplicationReviewView, RobuxVerifyView, StartTicketView
+from views import (
+    ApprovalView,
+    ModApplicationReviewView,
+    RobuxVerifyView,
+    StartTicketView,
+    WRRApprovalView,
+    WRRBlacklistConfirmView,
+    WRRTierSelectView,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,12 +46,16 @@ class FountainBot(commands.Bot):
         await self.load_extension("cogs.tickets")
         await self.load_extension("cogs.membership")
         await self.load_extension("cogs.mod_applications")
+        await self.load_extension("cogs.wrr")
 
         # Register persistent views so buttons keep working after restarts
         self.add_view(RobuxVerifyView())
         self.add_view(StartTicketView())
         self.add_view(ApprovalView())
         self.add_view(ModApplicationReviewView())
+        self.add_view(WRRTierSelectView())
+        self.add_view(WRRApprovalView())
+        self.add_view(WRRBlacklistConfirmView())
 
         # Sync slash commands to the guild for instant availability
         guild = discord.Object(id=config.GUILD_ID)

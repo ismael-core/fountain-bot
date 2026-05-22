@@ -14,6 +14,13 @@ LOGS_CHANNEL_ID = int(os.getenv("LOGS_CHANNEL_ID", "0"))
 BLACKLIST_CHANNEL_ID = int(os.getenv("BLACKLIST_CHANNEL_ID", "0"))  # optional
 TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0"))
 MOD_TICKET_CATEGORY_ID = int(os.getenv("MOD_TICKET_CATEGORY_ID", "0"))  # category for mod-recruitment applications
+WRR_TICKET_CATEGORY_ID = int(os.getenv("WRR_TICKET_CATEGORY_ID", "0"))  # category for WRR (Weather Roll) access tickets
+
+# WRR pricing tiers: amount → minutes of access. Edit these to change the deal.
+WRR_TIER_LOW_AMOUNT = int(os.getenv("WRR_TIER_LOW_AMOUNT", "50"))    # 50 WRR
+WRR_TIER_LOW_MINUTES = int(os.getenv("WRR_TIER_LOW_MINUTES", "30"))  # → 30 min
+WRR_TIER_HIGH_AMOUNT = int(os.getenv("WRR_TIER_HIGH_AMOUNT", "100"))  # 100 WRR
+WRR_TIER_HIGH_MINUTES = int(os.getenv("WRR_TIER_HIGH_MINUTES", "60"))  # → 1 hour
 MOD_ROLE_ID = int(os.getenv("MOD_ROLE_ID", "0"))
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 DEVELOPER_ROLE_ID = int(os.getenv("DEVELOPER_ROLE_ID", "0"))
@@ -45,6 +52,7 @@ MAX_REFRESHES_PER_TICKET = int(os.getenv("MAX_REFRESHES_PER_TICKET", "4"))
 # Grace period (minutes) between AFK expiration and blacklisting
 GRACE_MINUTES = int(os.getenv("GRACE_MINUTES", "10"))
 AUTO_CLOSE_HOURS_AFTER_EXPIRY = int(os.getenv("AUTO_CLOSE_HOURS_AFTER_EXPIRY", "24"))
+BUFF_DURATION_HOURS = int(os.getenv("BUFF_DURATION_HOURS", "1"))  # how long the in-game Fountain buff lasts
 
 # Comma-separated list of minutes before AFK expiration to send reminders
 PRE_EXPIRY_REMINDERS = [

@@ -121,6 +121,18 @@ def init_db():
                 FOREIGN KEY (application_id) REFERENCES mod_applications(id)
             );
 
+            CREATE TABLE IF NOT EXISTS wrr_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL UNIQUE,
+                status TEXT NOT NULL,
+                tier_minutes INTEGER,
+                created_at TIMESTAMP NOT NULL,
+                started_at TIMESTAMP,
+                expires_at TIMESTAMP,
+                approved_by INTEGER
+            );
+
             CREATE INDEX IF NOT EXISTS idx_refreshes_timestamp ON refreshes(timestamp);
             CREATE INDEX IF NOT EXISTS idx_refreshes_user ON refreshes(user_id);
             CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
@@ -129,6 +141,8 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log_entries(created_at);
             CREATE INDEX IF NOT EXISTS idx_modapp_channel ON mod_applications(channel_id);
             CREATE INDEX IF NOT EXISTS idx_modapp_user ON mod_applications(user_id);
+            CREATE INDEX IF NOT EXISTS idx_wrr_channel ON wrr_tickets(channel_id);
+            CREATE INDEX IF NOT EXISTS idx_wrr_user ON wrr_tickets(user_id);
         """)
 
         # Migrations for older versions of the DB
@@ -605,3 +619,78 @@ def get_mod_application_answers(application_id: int) -> list[dict]:
             (application_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ====================================================================
+# WRR (Weather Rolls) ticket helpers
+# ====================================================================
+
+# Status values for wrr_tickets
+WRR_STATUS_WAITING_TIER = "waiting_tier"
+WRR_STATUS_WAITING_BALANCE = "waiting_balance"
+WRR_STATUS_PENDING_BALANCE = "pending_balance"
+WRR_STATUS_WAITING_USAGE = "waiting_usage"
+WRR_STATUS_PENDING_USAGE = "pending_usage"
+WRR_STATUS_ACTIVE = "active"
+WRR_STATUS_EXPIRED_GRACE = "expired_grace"
+WRR_STATUS_CLOSED = "closed"
+
+
+def create_wrr_ticket(user_id: int, channel_id: int) -> int:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO wrr_tickets (user_id, channel_id, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, channel_id, WRR_STATUS_WAITING_TIER, utc_now()),
+        )
+        return cursor.lastrowid
+
+
+def get_wrr_ticket(ticket_id: int) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM wrr_tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_wrr_ticket_by_channel(channel_id: int) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM wrr_tickets WHERE channel_id = ?", (channel_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_wrr_ticket_status(ticket_id: int, status: str):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE wrr_tickets SET status = ? WHERE id = ?",
+            (status, ticket_id),
+        )
+
+
+def set_wrr_ticket_tier(ticket_id: int, tier_minutes: int):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE wrr_tickets SET tier_minutes = ? WHERE id = ?",
+            (tier_minutes, ticket_id),
+        )
+
+
+def approve_wrr_usage(ticket_id: int, mod_id: int, tier_minutes: int) -> datetime:
+    """Move ticket to ACTIVE and start the timer. Returns expires_at datetime."""
+    now = utc_now()
+    expires_at = now + timedelta(minutes=tier_minutes)
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE wrr_tickets
+            SET status = ?, started_at = ?, expires_at = ?, approved_by = ?
+            WHERE id = ?
+            """,
+            (WRR_STATUS_ACTIVE, now, expires_at, mod_id, ticket_id),
+        )
+    return expires_at

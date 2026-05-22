@@ -33,6 +33,15 @@ _COLORS = {
     "mod_app_completed": discord.Color.gold(),
     "mod_app_approved": discord.Color.green(),
     "mod_app_rejected": discord.Color.orange(),
+    "wrr_ticket_started": discord.Color.blue(),
+    "wrr_tier_selected": discord.Color.teal(),
+    "wrr_proof_uploaded": discord.Color.light_grey(),
+    "wrr_approved": discord.Color.green(),
+    "wrr_rejected": discord.Color.orange(),
+    "wrr_expired": discord.Color.gold(),
+    "wrr_timeout": discord.Color.dark_red(),
+    "wrr_blacklisted": discord.Color.red(),
+    "wrr_closed": discord.Color.dark_grey(),
 }
 
 

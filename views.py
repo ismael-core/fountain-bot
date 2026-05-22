@@ -494,3 +494,458 @@ class ModApplicationReviewView(discord.ui.View):
             await interaction.channel.delete(reason=f"Mod application rejected by {interaction.user}")
         except discord.DiscordException:
             log.exception("Failed to delete mod application channel %s", interaction.channel_id)
+
+
+# ====================================================================
+# WRR (Weather Rolls) Views
+# ====================================================================
+
+
+def _wrr_minutes_for_amount(amount: int) -> int:
+    """1 WRR = 0.6 min, so 100 WRR = 60 min. Amount must be multiple of 50."""
+    return amount * 60 // 100
+
+
+def _format_duration(minutes: int) -> str:
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    mins = minutes % 60
+    if mins == 0:
+        return f"{hours}h"
+    return f"{hours}h {mins}m"
+
+
+async def _set_wrr_tier_and_ask_balance(interaction: discord.Interaction, amount: int):
+    """Shared logic: validate ticket state, set tier, ask for balance screenshot."""
+    import database  # local import to avoid cycle issues
+    ticket = database.get_wrr_ticket_by_channel(interaction.channel_id)
+    if ticket is None:
+        await interaction.response.send_message("❌ No WRR ticket found in this channel.", ephemeral=True)
+        return
+    if interaction.user.id != ticket["user_id"]:
+        await interaction.response.send_message("❌ Only the ticket owner can pick a tier.", ephemeral=True)
+        return
+    if ticket["status"] != database.WRR_STATUS_WAITING_TIER:
+        await interaction.response.send_message(
+            f"⚠️ A tier was already selected for this ticket.",
+            ephemeral=True,
+        )
+        return
+
+    minutes = _wrr_minutes_for_amount(amount)
+    database.set_wrr_ticket_tier(ticket["id"], minutes)
+    database.set_wrr_ticket_status(ticket["id"], database.WRR_STATUS_WAITING_BALANCE)
+
+    duration_str = _format_duration(minutes)
+    embed = discord.Embed(
+        title=f"Selected: {amount} WRR → {duration_str} of access",
+        description=(
+            f"📸 {interaction.user.mention}, now upload a **screenshot of your "
+            f"current WRR balance** showing **at least {amount} WRR**.\n\n"
+            f"A mod will check the screenshot. If it matches, you'll get the "
+            f"game link to use your WRR."
+        ),
+        color=discord.Color.blue(),
+    )
+    embed.set_footer(text=f"WRR Ticket #{ticket['id']}")
+
+    if not interaction.response.is_done():
+        await interaction.response.send_message(content=interaction.user.mention, embed=embed)
+    else:
+        await interaction.followup.send(content=interaction.user.mention, embed=embed)
+
+    await audit_log.log_event(
+        interaction.client,
+        "wrr_tier_selected",
+        user=interaction.user,
+        ticket_id=ticket["id"],
+        details={"amount": amount, "minutes": minutes},
+    )
+
+
+class WRRCustomAmountModal(discord.ui.Modal, title="Custom WRR amount"):
+    amount = discord.ui.TextInput(
+        label="How much WRR will you use?",
+        placeholder="e.g., 550 — must be a multiple of 50, minimum 50",
+        min_length=2,
+        max_length=10,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = self.amount.value.strip()
+        try:
+            amount = int(raw)
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ That's not a valid number. Enter only digits, e.g., `550`.",
+                ephemeral=True,
+            )
+            return
+
+        if amount < 50:
+            await interaction.response.send_message(
+                "❌ Minimum is **50 WRR**.",
+                ephemeral=True,
+            )
+            return
+
+        if amount % 50 != 0:
+            await interaction.response.send_message(
+                f"❌ Must be a multiple of **50** (e.g., 450, 500, 550). You entered {amount}.",
+                ephemeral=True,
+            )
+            return
+
+        await _set_wrr_tier_and_ask_balance(interaction, amount)
+
+
+class WRRTierSelectView(discord.ui.View):
+    """Buttons for picking a WRR tier. 8 fixed tiers + custom amount."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="50 WRR (30m)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_50", row=0)
+    async def t50(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 50)
+
+    @discord.ui.button(label="100 WRR (1h)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_100", row=0)
+    async def t100(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 100)
+
+    @discord.ui.button(label="150 WRR (1h30)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_150", row=0)
+    async def t150(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 150)
+
+    @discord.ui.button(label="200 WRR (2h)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_200", row=0)
+    async def t200(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 200)
+
+    @discord.ui.button(label="250 WRR (2h30)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_250", row=1)
+    async def t250(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 250)
+
+    @discord.ui.button(label="300 WRR (3h)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_300", row=1)
+    async def t300(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 300)
+
+    @discord.ui.button(label="350 WRR (3h30)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_350", row=1)
+    async def t350(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 350)
+
+    @discord.ui.button(label="400 WRR (4h)", style=discord.ButtonStyle.secondary, custom_id="wrr_tier_400", row=1)
+    async def t400(self, interaction, button):
+        await _set_wrr_tier_and_ask_balance(interaction, 400)
+
+    @discord.ui.button(
+        label="💬 Other amount",
+        style=discord.ButtonStyle.primary,
+        custom_id="wrr_tier_custom",
+        row=2,
+    )
+    async def custom(self, interaction, button):
+        import database
+        ticket = database.get_wrr_ticket_by_channel(interaction.channel_id)
+        if ticket is None:
+            await interaction.response.send_message("❌ No WRR ticket here.", ephemeral=True)
+            return
+        if interaction.user.id != ticket["user_id"]:
+            await interaction.response.send_message("❌ Only the ticket owner.", ephemeral=True)
+            return
+        if ticket["status"] != database.WRR_STATUS_WAITING_TIER:
+            await interaction.response.send_message("⚠️ Tier already selected.", ephemeral=True)
+            return
+        await interaction.response.send_modal(WRRCustomAmountModal())
+
+
+class WRRApprovalView(discord.ui.View):
+    """Approve/Reject for WRR proof screenshots. Handles both balance and usage phases."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    def _is_mod(self, member) -> bool:
+        if not isinstance(member, discord.Member):
+            return False
+        return any(r.id == config.MOD_ROLE_ID for r in member.roles)
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="wrr_approve", emoji="✅")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import database
+        if not self._is_mod(interaction.user):
+            await interaction.response.send_message("❌ Only mods can approve.", ephemeral=True)
+            return
+
+        ticket = database.get_wrr_ticket_by_channel(interaction.channel_id)
+        if ticket is None:
+            await interaction.response.send_message("❌ No WRR ticket here.", ephemeral=True)
+            return
+
+        if ticket["status"] == database.WRR_STATUS_PENDING_BALANCE:
+            await self._approve_balance(interaction, ticket)
+        elif ticket["status"] == database.WRR_STATUS_PENDING_USAGE:
+            await self._approve_usage(interaction, ticket)
+        else:
+            await interaction.response.send_message(
+                f"⚠️ Ticket isn't pending review (status: `{ticket['status']}`).",
+                ephemeral=True,
+            )
+
+    async def _approve_balance(self, interaction, ticket):
+        import database
+        database.set_wrr_ticket_status(ticket["id"], database.WRR_STATUS_WAITING_USAGE)
+
+        # Disable buttons on the proof message
+        for child in self.children:
+            child.disabled = True
+
+        # Get game link (same as Fountain refresh — single shared config)
+        game_link = database.get_config("game_link") or "(no link configured — admins set with /set_link)"
+
+        user = interaction.guild.get_member(ticket["user_id"]) if interaction.guild else None
+        user_mention = user.mention if user else f"<@{ticket['user_id']}>"
+
+        await interaction.response.edit_message(
+            content=f"✅ Balance approved by {interaction.user.mention}. Posting link...",
+            view=self,
+        )
+
+        # Post the game link + usage instructions
+        amount_used = ticket["tier_minutes"] * 100 // 60
+        embed = discord.Embed(
+            title="Now use your WRR in-game",
+            description=(
+                f"💧 **Game link:** {game_link}\n\n"
+                f"You have **3 minutes** to:\n"
+                f"1. Join the game\n"
+                f"2. Use your {amount_used} WRR\n"
+                f"3. Upload a screenshot showing the WRR consumed + the game chat visible\n\n"
+                f"⚠️ If you don't upload the usage screenshot in 3 min, the ticket auto-cancels."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text=f"WRR Ticket #{ticket['id']}")
+        link_msg = await interaction.followup.send(content=user_mention, embed=embed)
+        try:
+            await link_msg.pin(reason="WRR game link for active ticket")
+        except discord.DiscordException:
+            pass
+
+        # Schedule 3-min timeout
+        wrr_cog = interaction.client.get_cog("WRR")
+        if wrr_cog:
+            wrr_cog.schedule_usage_timeout(ticket["id"])
+
+        await audit_log.log_event(
+            interaction.client,
+            "wrr_approved",
+            user=user,
+            mod=interaction.user,
+            ticket_id=ticket["id"],
+            details={"phase": "balance"},
+        )
+
+    async def _approve_usage(self, interaction, ticket):
+        import database
+        tier_minutes = ticket["tier_minutes"] or 30
+        expires_at = database.approve_wrr_usage(ticket["id"], interaction.user.id, tier_minutes)
+
+        for child in self.children:
+            child.disabled = True
+
+        expires_ts = int(expires_at.timestamp())
+        amount_used = tier_minutes * 100 // 60
+        duration_str = _format_duration(tier_minutes)
+
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Approved by {interaction.user.mention}.\n"
+                f"⏰ WRR access (**{amount_used} WRR / {duration_str}**) active until "
+                f"<t:{expires_ts}:F> (<t:{expires_ts}:R>).\n"
+                f"Reminders at 10 min and 5 min before expiry."
+            ),
+            view=self,
+        )
+
+        wrr_cog = interaction.client.get_cog("WRR")
+        if wrr_cog:
+            wrr_cog.schedule_active_ticket(ticket["id"])
+
+        user = interaction.guild.get_member(ticket["user_id"]) if interaction.guild else None
+        if user:
+            try:
+                await user.send(
+                    f"✅ Your WRR access is active for **{duration_str}**. "
+                    f"Expires <t:{expires_ts}:R>. You'll be reminded before the timer runs out."
+                )
+            except discord.DiscordException:
+                pass
+
+        await audit_log.log_event(
+            interaction.client,
+            "wrr_approved",
+            user=user,
+            mod=interaction.user,
+            ticket_id=ticket["id"],
+            details={
+                "phase": "usage",
+                "tier_minutes": tier_minutes,
+                "amount": amount_used,
+                "expires_at": expires_at.isoformat(),
+            },
+        )
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="wrr_reject", emoji="❌")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import database
+        if not self._is_mod(interaction.user):
+            await interaction.response.send_message("❌ Only mods can reject.", ephemeral=True)
+            return
+
+        ticket = database.get_wrr_ticket_by_channel(interaction.channel_id)
+        if ticket is None:
+            await interaction.response.send_message("❌ No WRR ticket here.", ephemeral=True)
+            return
+
+        if ticket["status"] == database.WRR_STATUS_PENDING_BALANCE:
+            new_status = database.WRR_STATUS_WAITING_BALANCE
+            kind = "balance"
+        elif ticket["status"] == database.WRR_STATUS_PENDING_USAGE:
+            new_status = database.WRR_STATUS_WAITING_USAGE
+            kind = "usage"
+        else:
+            await interaction.response.send_message(
+                f"⚠️ Ticket isn't pending review (status: `{ticket['status']}`).",
+                ephemeral=True,
+            )
+            return
+
+        database.set_wrr_ticket_status(ticket["id"], new_status)
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content=(
+                f"❌ {kind.capitalize()} proof rejected by {interaction.user.mention}. "
+                f"Upload a clearer screenshot."
+            ),
+            view=self,
+        )
+
+        user = interaction.guild.get_member(ticket["user_id"]) if interaction.guild else None
+        if user:
+            try:
+                await user.send(
+                    f"❌ Your WRR {kind} screenshot was rejected. "
+                    f"Upload a clearer one in the ticket."
+                )
+            except discord.DiscordException:
+                pass
+
+        await audit_log.log_event(
+            interaction.client,
+            "wrr_rejected",
+            user=user,
+            mod=interaction.user,
+            ticket_id=ticket["id"],
+            details={"phase": kind},
+        )
+
+
+class WRRBlacklistConfirmView(discord.ui.View):
+    """Shown in #fountain-logs after a WRR ticket expires.
+    Mods press the button if the user didn't leave the game → applies blacklist."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="User didn't leave → Blacklist",
+        style=discord.ButtonStyle.danger,
+        custom_id="wrr_blacklist_confirm",
+        emoji="⛔",
+    )
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import re
+        import database
+
+        if not isinstance(interaction.user, discord.Member) or not any(
+            r.id == config.MOD_ROLE_ID for r in interaction.user.roles
+        ):
+            await interaction.response.send_message("❌ Only mods can apply this.", ephemeral=True)
+            return
+
+        # Parse ticket ID from embed footer
+        ticket_id = None
+        if interaction.message and interaction.message.embeds:
+            footer = interaction.message.embeds[0].footer
+            if footer and footer.text:
+                m = re.search(r"WRR Ticket #(\d+)", footer.text)
+                if m:
+                    ticket_id = int(m.group(1))
+        if ticket_id is None:
+            await interaction.response.send_message("❌ Could not identify the ticket.", ephemeral=True)
+            return
+
+        ticket = database.get_wrr_ticket(ticket_id)
+        if ticket is None:
+            await interaction.response.send_message("❌ Ticket not found in DB.", ephemeral=True)
+            return
+
+        # Protect staff / owner
+        wrr_cog = interaction.client.get_cog("WRR")
+        if wrr_cog and await wrr_cog._is_protected(ticket["user_id"]):
+            await interaction.response.send_message(
+                "⚠️ This user has a protected role. Blacklist skipped.",
+                ephemeral=True,
+            )
+            return
+
+        entry = database.add_blacklist_strike(
+            ticket["user_id"],
+            config.BLACKLIST_DURATIONS_HOURS,
+            reason="Did not leave game after WRR access expired",
+        )
+
+        for child in self.children:
+            child.disabled = True
+
+        if entry["banned_until"] is None:
+            until_str = "permanently"
+        else:
+            until_ts = int(entry["banned_until"].timestamp())
+            until_str = f"until <t:{until_ts}:F>"
+
+        await interaction.response.edit_message(
+            content=(
+                f"⛔ Blacklist applied by {interaction.user.mention} — "
+                f"strike #{entry['strike_count']} {until_str}."
+            ),
+            view=self,
+        )
+
+        user = None
+        if interaction.guild:
+            user = interaction.guild.get_member(ticket["user_id"])
+        if user:
+            try:
+                await user.send(
+                    f"⛔ You've been blacklisted {until_str} (strike #{entry['strike_count']}) "
+                    f"for not leaving the game after your WRR access expired."
+                )
+            except discord.DiscordException:
+                pass
+
+        await audit_log.log_event(
+            interaction.client,
+            "wrr_blacklisted",
+            user=user,
+            mod=interaction.user,
+            ticket_id=ticket["id"],
+            details={
+                "strike_count": entry["strike_count"],
+                "banned_until": entry["banned_until"].isoformat() if entry["banned_until"] else "permanent",
+            },
+        )

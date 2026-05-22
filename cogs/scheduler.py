@@ -17,7 +17,7 @@ import database
 
 log = logging.getLogger("fountain.scheduler")
 
-BUFF_DURATION = timedelta(hours=1)
+BUFF_DURATION = timedelta(hours=config.BUFF_DURATION_HOURS)
 PRE_ALERT_ID = "pre_alert"
 POST_CHECK_ID = "post_check"
 
