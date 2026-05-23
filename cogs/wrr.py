@@ -60,12 +60,8 @@ class WRR(commands.Cog):
                 log.exception("Failed to re-arm WRR ticket %s", ticket["id"])
 
     def _iter_open_tickets(self):
-        with database.get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM wrr_tickets WHERE status NOT IN (?, ?)",
-                (database.WRR_STATUS_CLOSED, "cancelled"),
-            ).fetchall()
-        return [dict(r) for r in rows]
+        # Use the hydrated DB helper so datetimes come back tz-aware (UTC).
+        return database.get_open_wrr_tickets()
 
     # =================================================================
     # Listeners

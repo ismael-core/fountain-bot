@@ -648,12 +648,28 @@ def create_wrr_ticket(user_id: int, channel_id: int) -> int:
         return cursor.lastrowid
 
 
+def _hydrate_wrr_row(row) -> dict | None:
+    """Convert a sqlite3.Row from wrr_tickets into a dict with tz-aware datetimes.
+
+    SQLite stores timestamps without tzinfo, so we explicitly force UTC-awareness
+    on the datetime columns here. Without this, any arithmetic mixing these
+    timestamps with `datetime.now(timezone.utc)` raises TypeError.
+    """
+    if row is None:
+        return None
+    d = dict(row)
+    d["created_at"] = _aware(d.get("created_at"))
+    d["started_at"] = _aware(d.get("started_at"))
+    d["expires_at"] = _aware(d.get("expires_at"))
+    return d
+
+
 def get_wrr_ticket(ticket_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM wrr_tickets WHERE id = ?", (ticket_id,)
         ).fetchone()
-    return dict(row) if row else None
+    return _hydrate_wrr_row(row)
 
 
 def get_wrr_ticket_by_channel(channel_id: int) -> dict | None:
@@ -661,7 +677,17 @@ def get_wrr_ticket_by_channel(channel_id: int) -> dict | None:
         row = conn.execute(
             "SELECT * FROM wrr_tickets WHERE channel_id = ?", (channel_id,)
         ).fetchone()
-    return dict(row) if row else None
+    return _hydrate_wrr_row(row)
+
+
+def get_open_wrr_tickets() -> list[dict]:
+    """All WRR tickets not closed/cancelled, with tz-aware datetimes."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM wrr_tickets WHERE status NOT IN (?, ?)",
+            (WRR_STATUS_CLOSED, "cancelled"),
+        ).fetchall()
+    return [_hydrate_wrr_row(r) for r in rows]
 
 
 def set_wrr_ticket_status(ticket_id: int, status: str):
