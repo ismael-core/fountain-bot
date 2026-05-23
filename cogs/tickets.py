@@ -47,13 +47,11 @@ def _find_ticket_owner(channel: discord.TextChannel) -> discord.Member | None:
 
 def _build_robux_embed(owner: discord.Member, ticket_id: int) -> discord.Embed:
     return discord.Embed(
-        title="Verify your Robux balance",
+        title="📸 Step 1 — Show us your Robux",
         description=(
-            f"👋 Hi {owner.mention}\n\n"
-            f"Before we share the game link, we need to verify you have enough "
-            f"Robux for the refresh.\n\n"
-            f"📸 **Upload a screenshot of your current Robux balance directly in this channel.** "
-            f"I'll detect it automatically and forward it to the mods for review."
+            f"{owner.mention}\n\n"
+            f"Drop a **screenshot of your Robux balance** in this channel.\n"
+            f"That's it. Mods will check it and unlock the next step."
         ),
         color=discord.Color.blue(),
     ).set_footer(text=f"Ticket #{ticket_id}")

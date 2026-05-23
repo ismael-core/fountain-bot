@@ -111,15 +111,13 @@ class WRR(commands.Cog):
         ticket_id = database.create_wrr_ticket(owner.id, channel.id)
 
         embed = discord.Embed(
-            title="WRR access ticket",
+            title="🎟️ Step 1 — How much WRR are you using?",
             description=(
-                f"👋 Hi {owner.mention}\n\n"
-                f"Pick **how much WRR you're going to use**. The bot calculates your "
-                f"access time automatically:\n"
-                f"**1 WRR = 0.6 minutes** (100 WRR = 1 hour, 200 WRR = 2 hours, etc.)\n\n"
-                f"⚠️ The amount **must be a multiple of 50** (50, 100, 150, 200, ...). "
-                f"If you have 121 WRR you can use 100. If you have 352 you can use 300.\n\n"
-                f"Pick a tier below or hit **Other amount** for a custom number."
+                f"{owner.mention}\n\n"
+                f"Tap your amount below.\n\n"
+                f"⚠️ **Only multiples of 50** work (50, 100, 150, ...).\n"
+                f"Got 121 WRR? Pick **100**. Got 352? Pick **300**.\n\n"
+                f"_1 WRR = 0.6 min — the bot calculates time for you._"
             ),
             color=discord.Color.blue(),
         )

@@ -178,17 +178,15 @@ class ApprovalView(discord.ui.View):
 
         if fountain_is_full:
             # Hold the link — they'll get it when active_ping fires for their turn
+            ping_window = config.QUEUE_PRE_WARN_MINUTES + config.QUEUE_ACTIVE_PING_MINUTES
             embed = discord.Embed(
-                title="Robux verified — you're in the queue",
+                title="✅ You're in the queue — wait for the ping",
                 description=(
-                    f"Thanks {user_mention}, your Robux balance is verified.\n\n"
-                    f"The Fountain is currently topped up "
-                    f"(buff drops <t:{int(expires_at.timestamp())}:R>).\n"
-                    f"**Please wait** — the bot will send you the game link in this channel "
-                    f"when it's your turn, about **{config.QUEUE_PRE_WARN_MINUTES + config.QUEUE_ACTIVE_PING_MINUTES} "
-                    f"minutes** before the buff drops.\n\n"
-                    f"Stay around the Discord so you don't miss the ping. Thanks for helping keep "
-                    f"the Fountain alive 💧"
+                    f"{user_mention}\n\n"
+                    f"**Don't leave Discord.** When it's your turn we'll ping you here "
+                    f"with the game link.\n\n"
+                    f"Expected ping: about **{ping_window} min** before the buff drops "
+                    f"(<t:{int(expires_at.timestamp())}:R>)."
                 ),
                 color=discord.Color.blue(),
             )
@@ -198,14 +196,15 @@ class ApprovalView(discord.ui.View):
             # Fountain low or no buff state → post link immediately so user can act now
             game_link = database.get_config("game_link") or "(no link configured — admin must run /set_link)"
             embed = discord.Embed(
-                title="Now refresh the Fountain",
+                title="💧 Refresh the Fountain NOW",
                 description=(
-                    f"💧 {user_mention}\n\n"
-                    f"Your Robux balance is verified, and the Fountain needs a refresh now.\n\n"
-                    f"**Game link:** {game_link}\n\n"
-                    f"When you've done the refresh, tap the button below and upload the screenshot."
+                    f"{user_mention}\n\n"
+                    f"🔗 **Game link** → {game_link}\n\n"
+                    f"When the refresh is done:\n"
+                    f"1. Tap **📸 Send proof** below\n"
+                    f"2. Upload the screenshot"
                 ),
-                color=discord.Color.blue(),
+                color=discord.Color.gold(),
             )
             embed.set_footer(text=f"Ticket #{ticket['id']}")
             msg = await interaction.followup.send(
@@ -757,16 +756,16 @@ class WRRApprovalView(discord.ui.View):
         # Post the game link + usage instructions
         amount_used = ticket["tier_minutes"] * 100 // 60
         embed = discord.Embed(
-            title="Now use your WRR in-game",
+            title=f"🎮 Step 3 — Use your {amount_used} WRR (3 min window)",
             description=(
-                f"💧 **Game link:** {game_link}\n\n"
-                f"You have **3 minutes** to:\n"
-                f"1. Join the game\n"
-                f"2. Use your {amount_used} WRR\n"
-                f"3. Upload a screenshot showing the WRR consumed + the game chat visible\n\n"
-                f"⚠️ If you don't upload the usage screenshot in 3 min, the ticket auto-cancels."
+                f"{user_mention}\n\n"
+                f"🔗 **Game link** → {game_link}\n\n"
+                f"Then upload a screenshot here showing:\n"
+                f"• the **{amount_used} WRR consumed**\n"
+                f"• the **game chat visible**\n\n"
+                f"⚠️ You have **3 minutes** or the ticket auto-cancels."
             ),
-            color=discord.Color.blue(),
+            color=discord.Color.gold(),
         )
         embed.set_footer(text=f"WRR Ticket #{ticket['id']}")
         link_msg = await interaction.followup.send(content=user_mention, embed=embed)
@@ -993,32 +992,49 @@ class WRRBlacklistConfirmView(discord.ui.View):
         )
 
 
-class BuffTimeModal(discord.ui.Modal, title="Buff time remaining"):
-    """Mod fills in how much time the Fountain has after this refresh, taken from the screenshot."""
+class BuffTimeModal(discord.ui.Modal, title="Fountain buff — time visible"):
+    """Mod fills in how much time the Fountain has after this refresh, taken from the screenshot.
+
+    Accepts an optional `initial_value` so the retry flow can pre-fill what the mod
+    typed previously instead of forcing them to retype from scratch.
+    """
 
     buff_time = discord.ui.TextInput(
-        label="How much buff time? (read from the photo)",
-        placeholder="e.g. 59m, 1h, 1h30m, 55m32s, 90m",
-        default=f"{config.BUFF_DURATION_HOURS}h",
+        label="Time on the photo (e.g. 55m32s)",
+        placeholder="55m32s",
         min_length=2,
         max_length=15,
         required=True,
     )
 
-    def __init__(self, parent_view, ticket, proof_message):
+    def __init__(self, parent_view, ticket, proof_message, initial_value: str | None = None):
         super().__init__()
         self.parent_view = parent_view
         self.ticket = ticket
         self.proof_message = proof_message
+        # Pre-fill: either what the mod typed last time (retry), or the default duration.
+        self.buff_time.default = initial_value if initial_value else f"{config.BUFF_DURATION_HOURS}h"
 
     async def on_submit(self, interaction: discord.Interaction):
         # Import here to avoid circular import
         from cogs.refresh_queue import parse_time_to_minutes
 
-        minutes = parse_time_to_minutes(self.buff_time.value)
+        typed_value = self.buff_time.value
+        minutes = parse_time_to_minutes(typed_value)
         if minutes is None or minutes <= 0:
+            # Don't dead-end. Offer a Try Again button that re-opens the modal
+            # pre-filled with what they typed, so they can fix instead of retype.
+            retry_view = BuffTimeRetryView(
+                parent_view=self.parent_view,
+                ticket=self.ticket,
+                proof_message=self.proof_message,
+                last_value=typed_value,
+            )
             await interaction.response.send_message(
-                "❌ Invalid format. Try `30m`, `1h`, `1h30m`, `90m`, or `55m32s`.",
+                f"❌ Couldn't read **`{typed_value}`** as a time.\n"
+                f"Use formats like `55m32s`, `1h`, `1h30m`, `90m`, or plain minutes like `55`.\n\n"
+                f"Tap below to try again.",
+                view=retry_view,
                 ephemeral=True,
             )
             return
@@ -1028,4 +1044,31 @@ class BuffTimeModal(discord.ui.Modal, title="Buff time remaining"):
             ticket=self.ticket,
             buff_minutes=minutes,
             proof_message=self.proof_message,
+        )
+
+
+class BuffTimeRetryView(discord.ui.View):
+    """Ephemeral helper view: re-opens BuffTimeModal pre-filled with the mod's last input.
+
+    Not persistent — it lives only inside the ephemeral error reply, so a 5-min
+    timeout is enough. If the bot restarts in that window, the mod just clicks
+    Approve again on the original proof message.
+    """
+
+    def __init__(self, parent_view, ticket, proof_message, last_value: str):
+        super().__init__(timeout=300)
+        self.parent_view = parent_view
+        self.ticket = ticket
+        self.proof_message = proof_message
+        self.last_value = last_value
+
+    @discord.ui.button(label="Try again", style=discord.ButtonStyle.primary, emoji="🔁")
+    async def try_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            BuffTimeModal(
+                parent_view=self.parent_view,
+                ticket=self.ticket,
+                proof_message=self.proof_message,
+                initial_value=self.last_value,
+            )
         )
