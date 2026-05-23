@@ -144,7 +144,11 @@ class ApprovalView(discord.ui.View):
         if ticket["phase"] == database.TICKET_PHASE_ROBUX:
             await self._approve_robux(interaction, ticket)
         else:
-            await self._approve_refresh(interaction, ticket)
+            # Refresh-phase: open modal first to capture buff time the mod saw in the photo,
+            # then run the approval with that value. The modal calls back into _approve_refresh.
+            await interaction.response.send_modal(
+                BuffTimeModal(parent_view=self, ticket=ticket, proof_message=interaction.message)
+            )
 
     async def _approve_robux(self, interaction: discord.Interaction, ticket: dict):
         """Approve the Robux verification step and post the game link next,
@@ -200,8 +204,13 @@ class ApprovalView(discord.ui.View):
             ticket_id=ticket["id"],
         )
 
-    async def _approve_refresh(self, interaction: discord.Interaction, ticket: dict):
-        """Approve a refresh screenshot — bumps the AFK timer."""
+    async def _approve_refresh(self, interaction: discord.Interaction, ticket: dict, buff_minutes: int, proof_message: discord.Message):
+        """Approve a refresh screenshot — bumps the AFK timer AND registers the new buff state.
+
+        Called from BuffTimeModal.on_submit. interaction is the modal's interaction.
+        proof_message is the message that has the proof embed/attachment (passed through by the modal).
+        buff_minutes is what the mod typed in the modal (how much time the Fountain has now).
+        """
         if ticket["refresh_count"] >= config.MAX_REFRESHES_PER_TICKET:
             await interaction.response.send_message(
                 f"❌ This ticket already reached the max of "
@@ -212,14 +221,14 @@ class ApprovalView(discord.ui.View):
             )
             return
 
-        # Pull proof URL from the message (embed image or attachment fallback)
+        # Pull proof URL from the proof_message (embed image or attachment fallback)
         proof_url = ""
-        if interaction.message.embeds:
-            embed = interaction.message.embeds[0]
+        if proof_message.embeds:
+            embed = proof_message.embeds[0]
             if embed.image:
                 proof_url = embed.image.url
-        if not proof_url and interaction.message.attachments:
-            proof_url = interaction.message.attachments[0].url
+        if not proof_url and proof_message.attachments:
+            proof_url = proof_message.attachments[0].url
 
         expires_at = database.approve_refresh(
             ticket["id"],
@@ -237,35 +246,41 @@ class ApprovalView(discord.ui.View):
             ticket_id=ticket["id"],
         )
 
-        # After approval, replace the Approve/Reject buttons with a "Send proof"
-        # button so the user can extend their AFK time later without scrolling up
-        # to find the original button. Only attach it if they still have refreshes left.
         refreshes_used = ticket["refresh_count"] + 1
         if refreshes_used < config.MAX_REFRESHES_PER_TICKET:
             next_view = StartTicketView()
         else:
-            next_view = None  # max reached, no more refreshes possible
+            next_view = None
 
         expires_ts = int(expires_at.timestamp())
         approval_text = (
             f"✅ Approved by {interaction.user.mention}.\n"
             f"⏰ Your AFK time expires on **<t:{expires_ts}:F>** (<t:{expires_ts}:R>).\n"
             f"📊 Refreshes used: **{refreshes_used}/{config.MAX_REFRESHES_PER_TICKET}**.\n"
+            f"💧 Fountain buff registered: **{buff_minutes} min remaining**.\n"
         )
         if next_view is not None:
             approval_text += (
-                f"💡 To extend before expiry, tap the button below and upload a new screenshot. "
-                f"You'll get reminders 30 / 10 / 5 min before expiry."
+                f"💡 To extend before expiry, tap the button below and upload a new screenshot."
             )
         else:
             approval_text += (
                 f"⛔ This ticket reached the max refreshes. After this expires you'll need a new ticket."
             )
 
-        await interaction.response.edit_message(
-            content=approval_text,
-            view=next_view,
-        )
+        # Edit the proof message (not the modal interaction)
+        try:
+            await proof_message.edit(content=approval_text, view=next_view)
+        except discord.DiscordException:
+            pass
+        # Acknowledge the modal so it closes cleanly
+        try:
+            await interaction.response.send_message(
+                f"✅ Approval saved. Buff timer set to {buff_minutes} min.",
+                ephemeral=True,
+            )
+        except discord.DiscordException:
+            pass
 
         event_type = "refresh_extended" if is_extension else "refresh_approved"
         await audit_log.log_event(
@@ -278,6 +293,7 @@ class ApprovalView(discord.ui.View):
                 "refresh_count": ticket["refresh_count"] + 1,
                 "expires_at": expires_at.isoformat(),
                 "proof_url": proof_url or "(none)",
+                "buff_minutes_remaining": buff_minutes,
             },
         )
 
@@ -286,10 +302,10 @@ class ApprovalView(discord.ui.View):
         if membership is not None:
             membership.schedule_for_ticket(ticket["id"])
 
-        # Reschedule the in-game buff timer (the refresh just reset the buff to 1h)
-        scheduler_cog = interaction.client.get_cog("Scheduler")
-        if scheduler_cog is not None:
-            scheduler_cog.reschedule_after_refresh(datetime.now(timezone.utc))
+        # Register the new buff state and re-arm queue alerts
+        refresh_queue_cog = interaction.client.get_cog("RefreshQueue")
+        if refresh_queue_cog is not None:
+            refresh_queue_cog.set_buff_state(buff_minutes)
 
         # DM the user
         if user is not None:
@@ -948,4 +964,42 @@ class WRRBlacklistConfirmView(discord.ui.View):
                 "strike_count": entry["strike_count"],
                 "banned_until": entry["banned_until"].isoformat() if entry["banned_until"] else "permanent",
             },
+        )
+
+
+class BuffTimeModal(discord.ui.Modal, title="Buff time remaining"):
+    """Mod fills in how much time the Fountain has after this refresh, taken from the screenshot."""
+
+    buff_time = discord.ui.TextInput(
+        label="How much buff time? (read from the photo)",
+        placeholder="e.g. 59m, 1h, 1h30m, 55m32s, 90m",
+        default=f"{config.BUFF_DURATION_HOURS}h",
+        min_length=2,
+        max_length=15,
+        required=True,
+    )
+
+    def __init__(self, parent_view, ticket, proof_message):
+        super().__init__()
+        self.parent_view = parent_view
+        self.ticket = ticket
+        self.proof_message = proof_message
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Import here to avoid circular import
+        from cogs.refresh_queue import parse_time_to_minutes
+
+        minutes = parse_time_to_minutes(self.buff_time.value)
+        if minutes is None or minutes <= 0:
+            await interaction.response.send_message(
+                "❌ Invalid format. Try `30m`, `1h`, `1h30m`, `90m`, or `55m32s`.",
+                ephemeral=True,
+            )
+            return
+
+        await self.parent_view._approve_refresh(
+            interaction=interaction,
+            ticket=self.ticket,
+            buff_minutes=minutes,
+            proof_message=self.proof_message,
         )

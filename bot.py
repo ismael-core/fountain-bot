@@ -40,7 +40,7 @@ class FountainBot(commands.Bot):
 
         # Load all cogs
         await self.load_extension("cogs.refresh")
-        await self.load_extension("cogs.scheduler")
+        await self.load_extension("cogs.refresh_queue")
         await self.load_extension("cogs.admin")
         await self.load_extension("cogs.admin_config")
         await self.load_extension("cogs.tickets")

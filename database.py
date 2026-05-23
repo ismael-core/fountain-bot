@@ -694,3 +694,40 @@ def approve_wrr_usage(ticket_id: int, mod_id: int, tier_minutes: int) -> datetim
             (WRR_STATUS_ACTIVE, now, expires_at, mod_id, ticket_id),
         )
     return expires_at
+
+
+# ====================================================================
+# Buff state helpers — tracks current fountain buff expiry
+# ====================================================================
+
+def set_buff_expires_at(expires_at: datetime):
+    """Persist the moment the current buff drops. Used by the queue scheduler."""
+    set_config("buff_expires_at", expires_at.isoformat())
+
+
+def get_buff_expires_at() -> Optional[datetime]:
+    """Read current buff expiry. None if never set or invalid."""
+    raw = get_config("buff_expires_at")
+    if not raw:
+        return None
+    try:
+        ts = datetime.fromisoformat(raw)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts
+    except (ValueError, TypeError):
+        return None
+
+
+def get_refresh_queue() -> list[dict]:
+    """Return open tickets in refresh phase, waiting for refresh proof, FIFO by creation."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE status = ? AND phase = ?
+            ORDER BY created_at ASC
+            """,
+            (TICKET_WAITING_PROOF, TICKET_PHASE_REFRESH),
+        ).fetchall()
+    return [dict(r) for r in rows]

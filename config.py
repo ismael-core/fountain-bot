@@ -13,6 +13,11 @@ MANAGEMENT_CHANNEL_ID = int(os.getenv("MANAGEMENT_CHANNEL_ID", "0"))
 LOGS_CHANNEL_ID = int(os.getenv("LOGS_CHANNEL_ID", "0"))
 BLACKLIST_CHANNEL_ID = int(os.getenv("BLACKLIST_CHANNEL_ID", "0"))  # optional
 TICKET_CATEGORY_ID = int(os.getenv("TICKET_CATEGORY_ID", "0"))
+FOUNTAIN_GENERAL_CHANNEL_ID = int(os.getenv("FOUNTAIN_GENERAL_CHANNEL_ID", "0"))  # where to post queue alerts
+QUEUE_PRE_WARN_MINUTES = int(os.getenv("QUEUE_PRE_WARN_MINUTES", "5"))     # min before active ping to warn queued user
+QUEUE_ACTIVE_PING_MINUTES = int(os.getenv("QUEUE_ACTIVE_PING_MINUTES", "10"))  # min before buff expires to ping queue
+QUEUE_GENERAL_ALERT_MINUTES = int(os.getenv("QUEUE_GENERAL_ALERT_MINUTES", "5"))  # general alert if queue empty
+QUEUE_URGENT_ALERT_MINUTES = int(os.getenv("QUEUE_URGENT_ALERT_MINUTES", "3"))   # urgent @here if still empty
 MOD_TICKET_CATEGORY_ID = int(os.getenv("MOD_TICKET_CATEGORY_ID", "0"))  # category for mod-recruitment applications
 WRR_TICKET_CATEGORY_ID = int(os.getenv("WRR_TICKET_CATEGORY_ID", "0"))  # category for WRR (Weather Roll) access tickets
 
