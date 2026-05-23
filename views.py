@@ -151,9 +151,11 @@ class ApprovalView(discord.ui.View):
             )
 
     async def _approve_robux(self, interaction: discord.Interaction, ticket: dict):
-        """Approve the Robux verification step and post the game link next,
-        with a 'Send proof' button so the user has a clear trigger to upload
-        their refresh screenshot."""
+        """Approve Robux verification. If the Fountain is full, hold the link until
+        the user's turn comes (active_ping). If the Fountain is low/empty, post the
+        link immediately so they can act now."""
+        from datetime import datetime, timezone
+
         database.set_ticket_phase(ticket["id"], database.TICKET_PHASE_REFRESH)
         database.set_ticket_status(ticket["id"], database.TICKET_WAITING_PROOF)
 
@@ -161,40 +163,60 @@ class ApprovalView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
-            content=(
-                f"✅ Robux balance approved by {interaction.user.mention}. "
-                f"Posting game link next."
-            ),
+            content=f"✅ Robux balance approved by {interaction.user.mention}.",
             view=self,
         )
 
         user = interaction.guild.get_member(ticket["user_id"])
-        game_link = database.get_config("game_link") or "(no link configured — admin must run /set_link)"
         user_mention = user.mention if user else f"<@{ticket['user_id']}>"
 
-        embed = discord.Embed(
-            title="Now refresh the Fountain",
-            description=(
-                f"💧 {user_mention}\n\n"
-                f"Your Robux balance is verified. Now do the refresh in-game.\n\n"
-                f"**Game link:** {game_link}\n\n"
-                f"When you've done the refresh, tap the button below and upload the screenshot."
-            ),
-            color=discord.Color.blue(),
-        )
-        embed.set_footer(text=f"Ticket #{ticket['id']}")
+        # Decide: hold the link (fountain full) or post it now (fountain low)
+        expires_at = database.get_buff_expires_at()
+        now = datetime.now(timezone.utc)
+        minutes_left = ((expires_at - now).total_seconds() / 60) if expires_at else 0
+        fountain_is_full = expires_at is not None and minutes_left > config.QUEUE_ACTIVE_PING_MINUTES
 
-        msg = await interaction.followup.send(
-            content=user_mention,
-            embed=embed,
-            view=StartTicketView(),
-        )
-
-        # Pin so the user can always find the game link + button without scrolling
-        try:
-            await msg.pin(reason="Pinning game-link message for ticket")
-        except discord.DiscordException:
-            log.exception("Failed to pin refresh message in %s", interaction.channel_id)
+        if fountain_is_full:
+            # Hold the link — they'll get it when active_ping fires for their turn
+            embed = discord.Embed(
+                title="Robux verified — you're in the queue",
+                description=(
+                    f"Thanks {user_mention}, your Robux balance is verified.\n\n"
+                    f"The Fountain is currently topped up "
+                    f"(buff drops <t:{int(expires_at.timestamp())}:R>).\n"
+                    f"**Please wait** — the bot will send you the game link in this channel "
+                    f"when it's your turn, about **{config.QUEUE_PRE_WARN_MINUTES + config.QUEUE_ACTIVE_PING_MINUTES} "
+                    f"minutes** before the buff drops.\n\n"
+                    f"Stay around the Discord so you don't miss the ping. Thanks for helping keep "
+                    f"the Fountain alive 💧"
+                ),
+                color=discord.Color.blue(),
+            )
+            embed.set_footer(text=f"Ticket #{ticket['id']}")
+            await interaction.followup.send(content=user_mention, embed=embed)
+        else:
+            # Fountain low or no buff state → post link immediately so user can act now
+            game_link = database.get_config("game_link") or "(no link configured — admin must run /set_link)"
+            embed = discord.Embed(
+                title="Now refresh the Fountain",
+                description=(
+                    f"💧 {user_mention}\n\n"
+                    f"Your Robux balance is verified, and the Fountain needs a refresh now.\n\n"
+                    f"**Game link:** {game_link}\n\n"
+                    f"When you've done the refresh, tap the button below and upload the screenshot."
+                ),
+                color=discord.Color.blue(),
+            )
+            embed.set_footer(text=f"Ticket #{ticket['id']}")
+            msg = await interaction.followup.send(
+                content=user_mention,
+                embed=embed,
+                view=StartTicketView(),
+            )
+            try:
+                await msg.pin(reason="Pinning game-link message for ticket")
+            except discord.DiscordException:
+                log.exception("Failed to pin refresh message in %s", interaction.channel_id)
 
         await audit_log.log_event(
             interaction.client,
@@ -202,6 +224,10 @@ class ApprovalView(discord.ui.View):
             user=user,
             mod=interaction.user,
             ticket_id=ticket["id"],
+            details={
+                "fountain_was_full": fountain_is_full,
+                "minutes_left_in_buff": int(minutes_left) if expires_at else None,
+            },
         )
 
     async def _approve_refresh(self, interaction: discord.Interaction, ticket: dict, buff_minutes: int, proof_message: discord.Message):

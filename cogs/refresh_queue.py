@@ -140,6 +140,8 @@ class RefreshQueue(commands.Cog):
 
     async def _fire_active_ping(self):
         """Ping next queued user with the game link, give them a window to refresh."""
+        from views import StartTicketView
+
         queue = database.get_refresh_queue()
         if not queue:
             return
@@ -161,17 +163,22 @@ class RefreshQueue(commands.Cog):
                 f"Steps:\n"
                 f"1. Join the game using the link above\n"
                 f"2. Refresh the Fountain in-game\n"
-                f"3. Come back here and upload your refresh screenshot\n\n"
+                f"3. Tap the button below and upload your refresh screenshot\n\n"
                 f"Thanks for keeping the Fountain alive 💧"
             ),
             color=discord.Color.blue(),
         )
         try:
-            await channel.send(
+            msg = await channel.send(
                 content=f"<@{ticket['user_id']}>",
                 embed=embed,
+                view=StartTicketView(),
                 allowed_mentions=discord.AllowedMentions(users=True),
             )
+            try:
+                await msg.pin(reason="Pinning active-turn message")
+            except discord.DiscordException:
+                pass
         except discord.DiscordException:
             log.exception("Failed to send active ping in %s", channel.id)
 
