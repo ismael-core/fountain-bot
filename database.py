@@ -757,3 +757,94 @@ def get_refresh_queue() -> list[dict]:
             (TICKET_WAITING_PROOF, TICKET_PHASE_REFRESH),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ====================================================================
+# System pause + reset helpers
+# Used by /system pause|resume|reset. Pause silences queue alerts and
+# blacklist application without blocking the rest of the bot. Reset
+# wipes everything except the game_link config (one-time use to clear
+# pre-launch test noise).
+# ====================================================================
+
+SYSTEM_PAUSED_KEY = "system_paused"
+
+
+def is_paused() -> bool:
+    """True if the system has been put in paused mode via /system pause."""
+    return get_config(SYSTEM_PAUSED_KEY) == "1"
+
+
+def set_paused(paused: bool, by_user_id: Optional[int] = None) -> None:
+    """Toggle the paused flag. Persisted so it survives restarts."""
+    set_config(SYSTEM_PAUSED_KEY, "1" if paused else "0", updated_by=by_user_id)
+
+
+# Counts every table we know about so the dry-run can show the user what's
+# about to die. Keep this list in sync with init_db().
+_RESET_COUNTABLE_TABLES = [
+    "refreshes",
+    "tickets",
+    "blacklist",
+    "audit_log_entries",
+    "mod_applications",
+    "mod_application_answers",
+    "wrr_tickets",
+]
+
+
+def reset_dry_run_counts() -> dict:
+    """Return row counts for every table reset_all_data() would wipe.
+
+    Used by /system reset to show the user exactly what they're about to nuke
+    BEFORE they click the confirm button.
+    """
+    counts = {}
+    with get_connection() as conn:
+        for table in _RESET_COUNTABLE_TABLES:
+            try:
+                row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                counts[table] = row[0] if row else 0
+            except sqlite3.Error:
+                counts[table] = 0
+        # Also count config keys other than game_link (those get wiped too)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM config WHERE key != ?", ("game_link",)
+            ).fetchone()
+            counts["config_keys_non_game_link"] = row[0] if row else 0
+        except sqlite3.Error:
+            counts["config_keys_non_game_link"] = 0
+    return counts
+
+
+def reset_all_data() -> dict:
+    """Wipe every row from every data table EXCEPT the game_link config entry.
+
+    Returns counts of rows deleted per table (for the audit/confirmation message).
+    Also sets the paused flag ON so the system stays paused until the operator
+    explicitly resumes — prevents accidental "reset and immediately ping @here".
+    """
+    deleted = {}
+    with get_connection() as conn:
+        for table in _RESET_COUNTABLE_TABLES:
+            try:
+                cursor = conn.execute(f"DELETE FROM {table}")
+                deleted[table] = cursor.rowcount
+            except sqlite3.Error:
+                deleted[table] = 0
+        # Wipe all config EXCEPT game_link
+        try:
+            cursor = conn.execute(
+                "DELETE FROM config WHERE key != ?", ("game_link",)
+            )
+            deleted["config_keys"] = cursor.rowcount
+        except sqlite3.Error:
+            deleted["config_keys"] = 0
+        # Force paused = ON so a resume is required before the system starts
+        # firing pings / applying blacklists again.
+        conn.execute(
+            "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, ?)",
+            (SYSTEM_PAUSED_KEY, "1", datetime.now(timezone.utc)),
+        )
+    return deleted

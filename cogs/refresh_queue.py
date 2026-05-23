@@ -120,6 +120,9 @@ class RefreshQueue(commands.Cog):
 
     async def _fire_pre_warn(self):
         """Gentle heads-up to the next queued user that their turn is coming."""
+        if database.is_paused():
+            log.info("Skipping pre-warn — system is paused")
+            return
         queue = database.get_refresh_queue()
         if not queue:
             return
@@ -142,6 +145,9 @@ class RefreshQueue(commands.Cog):
         """Ping next queued user with the game link, give them a window to refresh."""
         from views import StartTicketView
 
+        if database.is_paused():
+            log.info("Skipping active ping — system is paused")
+            return
         queue = database.get_refresh_queue()
         if not queue:
             return
@@ -184,6 +190,9 @@ class RefreshQueue(commands.Cog):
 
     async def _fire_general_alert(self):
         """Polite alert in #fountain-general if no one is queued yet."""
+        if database.is_paused():
+            log.info("Skipping general alert — system is paused")
+            return
         queue = database.get_refresh_queue()
         if queue:
             return  # someone's already on it
@@ -201,6 +210,9 @@ class RefreshQueue(commands.Cog):
 
     async def _fire_urgent_alert(self):
         """Escalated @here alert if buff is critically low and still no queue."""
+        if database.is_paused():
+            log.info("Skipping urgent alert — system is paused")
+            return
         queue = database.get_refresh_queue()
         if queue:
             return

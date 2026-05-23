@@ -47,6 +47,7 @@ class FountainBot(commands.Bot):
         await self.load_extension("cogs.membership")
         await self.load_extension("cogs.mod_applications")
         await self.load_extension("cogs.wrr")
+        await self.load_extension("cogs.system")
         await self.load_extension("cogs.justcode")  # TEMP — remove when the joke gets old
 
         # Register persistent views so buttons keep working after restarts

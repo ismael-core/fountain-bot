@@ -212,6 +212,29 @@ class Membership(commands.Cog):
             )
             return
 
+        # System pause guard: when paused, skip blacklist application entirely.
+        # Close the ticket cleanly and log it. The user gets no strike.
+        if database.is_paused():
+            database.set_ticket_status(ticket_id, database.TICKET_CLOSED)
+            channel = self.bot.get_channel(ticket["channel_id"])
+            if channel is not None:
+                try:
+                    await channel.send(
+                        f"⏸️ System is paused — skipping blacklist for <@{ticket['user_id']}>. "
+                        f"Ticket closed without a strike.",
+                        allowed_mentions=discord.AllowedMentions(users=False),
+                    )
+                except discord.DiscordException:
+                    pass
+            await audit_log.log_event(
+                self.bot,
+                "blacklisted",
+                user=await self._fetch_user(ticket["user_id"]),
+                ticket_id=ticket_id,
+                details={"skipped": "system paused"},
+            )
+            return
+
         user = await self._fetch_user(ticket["user_id"])
 
         entry = database.add_blacklist_strike(

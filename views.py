@@ -944,6 +944,15 @@ class WRRBlacklistConfirmView(discord.ui.View):
             )
             return
 
+        # System pause guard: when paused, no blacklists get applied.
+        if database.is_paused():
+            await interaction.response.send_message(
+                "⏸️ System is paused — blacklist not applied. "
+                "Use `/system resume` first if you want strikes to take effect.",
+                ephemeral=True,
+            )
+            return
+
         entry = database.add_blacklist_strike(
             ticket["user_id"],
             config.BLACKLIST_DURATIONS_HOURS,
